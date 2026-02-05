@@ -3,11 +3,14 @@ __pycache__/
 *.py[codz]
 *$py.class
 
-
 # C extensions
 *.so
+
+# Arquivos de dados (CSV, Excel, etc.)
 *.csv
 *.xlsx
+*.xls
+
 # Distribution / packaging
 .Python
 build/
@@ -27,6 +30,22 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+
+# Arquivos do sistema Windows
+desktop.ini
+Thumbs.db
+*.lnk
+
+# IDE/Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Pasta de dados específica (se quiser ignorar toda a pasta)
+# dados/
+# data/
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
