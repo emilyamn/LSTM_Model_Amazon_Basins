@@ -6,6 +6,20 @@ import pandas as pd
 import numpy as np
 from typing import Dict, List, Tuple, Optional
 import pathlib
+import sys
+
+# Adicionar o caminho para importar config_loader
+# Supondo que utils está no mesmo nível que data_processing
+current_dir = pathlib.Path(__file__).parent
+utils_path = current_dir.parent / "utils"
+sys.path.insert(0, str(utils_path))
+
+try:
+    from config_loader import load_feature_config
+    CONFIG_AVAILABLE = True
+except ImportError:
+    CONFIG_AVAILABLE = False
+    print("⚠️  Módulo config_loader não encontrado. Usando valores padrão.")
 
 
 class HydroFeatureEngineer:
@@ -427,7 +441,8 @@ def process_features(input_dir: pathlib.Path,
                     evapotranspiration_ma_windows: Optional[List[int]] = None,
                     anomaly_ma_windows: Optional[List[int]] = None,
                     train_date_cutoff: Optional[str] = None,
-                    output_filename: str = "features_combined.csv") -> pd.DataFrame:
+                    output_filename: str = "features_combined.csv",
+                    use_config_file: bool = True) -> pd.DataFrame:
     """
     Função principal para processamento de features.
     
@@ -435,7 +450,7 @@ def process_features(input_dir: pathlib.Path,
         input_dir: Diretório com séries completas (complete_series)
         output_dir: Diretório para salvar resultados (processed)
         station_ids: Lista de IDs das estações para processar
-        api_k_list: Lista de valores k para API
+        api_k_list: Lista de valores k para API (se None, tenta carregar do config)
         precipitation_ma_windows: Janelas para médias móveis de precipitação
         precipitation_cumulative_windows: Janelas para acumulados de precipitação
         forecast_ma_windows: Janelas para médias móveis de forecast
@@ -444,11 +459,51 @@ def process_features(input_dir: pathlib.Path,
         anomaly_ma_windows: Janelas para médias móveis de anomalias
         train_date_cutoff: Data de corte para estatísticas
         output_filename: Nome do arquivo de saída
+        use_config_file: Se True, tenta carregar configurações do arquivo YAML
         
     Returns:
         DataFrame com features processadas
     """
     print("Iniciando processamento de features...")
+    
+    # Carregar configurações do arquivo YAML se solicitado
+    if use_config_file and CONFIG_AVAILABLE:
+        try:
+            config = load_feature_config()
+            print("✅ Configurações carregadas do arquivo YAML")
+            
+            # Sobrescrever apenas os parâmetros que não foram fornecidos explicitamente
+            if api_k_list is None:
+                api_k_list = config.get('api_k_list')
+                print(f"  - api_k_list carregado do config: {api_k_list}")
+            
+            if precipitation_ma_windows is None:
+                precipitation_ma_windows = config.get('precipitation_ma')
+                print(f"  - precipitation_ma carregado do config: {precipitation_ma_windows}")
+            
+            if precipitation_cumulative_windows is None:
+                precipitation_cumulative_windows = config.get('precipitation_cum')
+                print(f"  - precipitation_cum carregado do config: {precipitation_cumulative_windows}")
+            
+            if forecast_ma_windows is None:
+                forecast_ma_windows = config.get('forecast_ma', config.get('precipitation_ma'))
+                print(f"  - forecast_ma carregado do config: {forecast_ma_windows}")
+            
+            if forecast_cumulative_windows is None:
+                forecast_cumulative_windows = config.get('forecast_cum', config.get('precipitation_cum'))
+                print(f"  - forecast_cum carregado do config: {forecast_cumulative_windows}")
+            
+            if evapotranspiration_ma_windows is None:
+                evapotranspiration_ma_windows = config.get('evapotranspiration_ma')
+                print(f"  - evapotranspiration_ma carregado do config: {evapotranspiration_ma_windows}")
+            
+            if anomaly_ma_windows is None:
+                anomaly_ma_windows = config.get('anomaly_ma')
+                print(f"  - anomaly_ma carregado do config: {anomaly_ma_windows}")
+                
+        except Exception as e:
+            print(f"⚠️  Erro ao carregar configurações do arquivo: {e}")
+            print("  Usando valores padrão ou fornecidos como parâmetro")
     
     # Verificar diretórios
     if not input_dir.exists():

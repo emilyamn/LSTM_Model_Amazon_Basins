@@ -92,6 +92,7 @@ static_keys:
 
 # Janelas para features (se necessário)
 feature_windows:
+  api_k_list: [0.70, 0.80, 0.85, 0.90, 0.92, 0.95]
   precipitation_ma: [3, 7, 15]
   precipitation_cum: [3, 5, 7, 10]
   evapotranspiration_ma: [7, 14, 30]
