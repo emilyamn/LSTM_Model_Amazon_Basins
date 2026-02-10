@@ -2,9 +2,9 @@
 Utilitários para manipulação de dados.
 """
 
+from typing import List
 import torch
 import numpy as np
-from typing import List
 from src.data.data_structures import Sample
 
 
