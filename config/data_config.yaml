@@ -98,7 +98,27 @@ feature_windows:
   evapotranspiration_ma: [7, 14, 30]
   anomaly_ma: [3, 7]
 
-# Configurações de split
-train_ratio: 0.95
-gap: 128
-window_stride: 1
+# Configurações de split (train/val/test)
+split_config:
+  # Proporções devem somar 1.0
+  train_ratio: 0.95    # 95% para treino
+  val_ratio: 0.025     # 2.5% para validação
+  test_ratio: 0.025    # 2.5% para teste
+  
+  # Gap entre conjuntos (em dias)
+  gap: 128
+  
+  # Stride para janelas deslizantes
+  window_stride: 1
+
+# Caminhos dos dados
+data_paths:
+  complete_series_dir: "data/complete_series"
+  processed_dir: "data/processed"
+  models_dir: "data/models"
+
+# Configurações do modelo
+model_config:
+  train_test_split: 0.8
+  validation_split: 0.2
+  random_seed: 42

@@ -4,8 +4,9 @@ Módulo para carregar configurações de arquivos YAML.
 
 import yaml
 import pathlib
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
 import os
+from datetime import datetime, timedelta
 
 
 class ConfigLoader:
@@ -130,6 +131,106 @@ class ConfigLoader:
         
         return feature_config
     
+    def get_split_config(self) -> Dict[str, Any]:
+        """
+        Carrega as configurações de split (train/val/test).
+        
+        Returns:
+            Dicionário com configurações de split
+            
+        Raises:
+            ValueError: Se alguma configuração necessária estiver faltando
+        """
+        config = self.load_config("data_config.yaml")
+        
+        # Verificar se a seção split_config existe
+        if "split_config" not in config:
+            raise ValueError(
+                "❌ ERRO: Seção 'split_config' não encontrada no arquivo data_config.yaml.\n"
+                "Por favor, adicione a seção 'split_config' com as seguintes chaves:\n"
+                "  - train_ratio (ex: 0.95)\n"
+                "  - val_ratio (ex: 0.025)\n" 
+                "  - test_ratio (ex: 0.025)\n"
+                "  - gap (ex: 128)\n"
+                "  - window_stride (ex: 1)\n\n"
+                "Exemplo de estrutura:\n"
+                "split_config:\n"
+                "  train_ratio: 0.95\n"
+                "  val_ratio: 0.025\n"
+                "  test_ratio: 0.025\n"
+                "  gap: 128\n"
+                "  window_stride: 1\n"
+                "  # A soma de train_ratio + val_ratio + test_ratio deve ser 1.0"
+            )
+        
+        split_config = config["split_config"]
+        
+        # Lista de chaves obrigatórias
+        required_keys = ["train_ratio", "val_ratio", "test_ratio", "gap", "window_stride"]
+        
+        # Verificar chaves faltantes
+        missing_keys = []
+        for key in required_keys:
+            if key not in split_config:
+                missing_keys.append(key)
+        
+        if missing_keys:
+            raise ValueError(
+                f"❌ ERRO: Configurações de split obrigatórias faltando no arquivo data_config.yaml:\n"
+                f"Chaves faltantes: {', '.join(missing_keys)}\n\n"
+                f"Por favor, adicione estas configurações à seção 'split_config'.\n"
+                f"Arquivo de configuração: {self.config_dir / 'data_config.yaml'}"
+            )
+        
+        # Validar que a soma dos ratios é 1.0
+        total_ratio = split_config["train_ratio"] + split_config["val_ratio"] + split_config["test_ratio"]
+        if abs(total_ratio - 1.0) > 0.001:
+            raise ValueError(
+                f"❌ ERRO: A soma de train_ratio + val_ratio + test_ratio deve ser 1.0, mas é {total_ratio:.3f}\n"
+                f"Por favor, corrija no arquivo data_config.yaml"
+            )
+        
+        return split_config
+    
+    def calculate_split_dates(self, start_date: str, end_date: str) -> Dict[str, str]:
+        """
+        Calcula as datas de corte para train/val/test baseado nas configurações.
+        
+        Args:
+            start_date: Data inicial no formato 'YYYY-MM-DD'
+            end_date: Data final no formato 'YYYY-MM-DD'
+            
+        Returns:
+            Dicionário com as datas de corte
+        """
+        split_config = self.get_split_config()
+        
+        # Converter strings para datetime
+        start = datetime.strptime(start_date, "%Y-%m-%d")
+        end = datetime.strptime(end_date, "%Y-%m-%d")
+        
+        total_days = (end - start).days
+        
+        # Calcular número de dias para cada split
+        train_days = int(total_days * split_config["train_ratio"])
+        val_days = int(total_days * split_config["val_ratio"])
+        # test_days é o restante
+        
+        # Calcular datas de corte
+        train_end = start + timedelta(days=train_days)
+        val_end = train_end + timedelta(days=val_days)
+        
+        return {
+            "train_end": train_end.strftime("%Y-%m-%d"),
+            "val_end": val_end.strftime("%Y-%m-%d"),
+            "test_end": end_date,
+            "train_start": start_date,
+            "total_days": total_days,
+            "train_days": train_days,
+            "val_days": val_days,
+            "test_days": total_days - train_days - val_days
+        }
+    
     @staticmethod
     def validate_feature_config(feature_config: Dict[str, Any]) -> bool:
         """
@@ -170,6 +271,53 @@ class ConfigLoader:
         return True
     
     @staticmethod
+    def validate_split_config(split_config: Dict[str, Any]) -> bool:
+        """
+        Valida se as configurações de split são válidas.
+        
+        Args:
+            split_config: Dicionário com configurações de split
+            
+        Returns:
+            True se válido, False se não
+            
+        Raises:
+            ValueError: Com mensagem detalhada do problema
+        """
+        errors = []
+        
+        # Verificar tipos
+        for key in ["train_ratio", "val_ratio", "test_ratio"]:
+            if key in split_config:
+                value = split_config[key]
+                if not isinstance(value, (int, float)):
+                    errors.append(f"'{key}' deve ser um número (tipo atual: {type(value)})")
+                elif not 0 <= value <= 1:
+                    errors.append(f"'{key}' deve estar entre 0 e 1. Valor atual: {value}")
+        
+        for key in ["gap", "window_stride"]:
+            if key in split_config:
+                value = split_config[key]
+                if not isinstance(value, int):
+                    errors.append(f"'{key}' deve ser um inteiro (tipo atual: {type(value)})")
+                elif value < 1:
+                    errors.append(f"'{key}' deve ser maior que 0. Valor atual: {value}")
+        
+        # Verificar soma dos ratios
+        if all(k in split_config for k in ["train_ratio", "val_ratio", "test_ratio"]):
+            total = (split_config["train_ratio"] + 
+                    split_config["val_ratio"] + 
+                    split_config["test_ratio"])
+            if abs(total - 1.0) > 0.001:
+                errors.append(f"A soma train_ratio + val_ratio + test_ratio deve ser 1.0, mas é {total:.3f}")
+        
+        if errors:
+            error_msg = "\n".join([f"  • {error}" for error in errors])
+            raise ValueError(f"❌ ERRO na validação das configurações de split:\n{error_msg}")
+        
+        return True
+    
+    @staticmethod
     def create_default_config(config_dir: pathlib.Path) -> None:
         """
         Cria um arquivo de configuração padrão se não existir.
@@ -189,6 +337,13 @@ class ConfigLoader:
                     "evapotranspiration_ma": [7, 14, 30],
                     "anomaly_ma": [3, 7],
                     "api_k_list": [0.70, 0.80, 0.85, 0.90, 0.92, 0.95]
+                },
+                "split_config": {
+                    "train_ratio": 0.95,
+                    "val_ratio": 0.025,
+                    "test_ratio": 0.025,
+                    "gap": 128,
+                    "window_stride": 1
                 },
                 "data_paths": {
                     "complete_series_dir": "data/complete_series",
@@ -225,5 +380,24 @@ def load_feature_config(validate: bool = True) -> Dict[str, Any]:
     
     if validate:
         loader.validate_feature_config(config)
+    
+    return config
+
+
+def load_split_config(validate: bool = True) -> Dict[str, Any]:
+    """
+    Função de conveniência para carregar configurações de split.
+    
+    Args:
+        validate: Se True, valida as configurações carregadas
+        
+    Returns:
+        Dicionário com configurações de split
+    """
+    loader = ConfigLoader()
+    config = loader.get_split_config()
+    
+    if validate:
+        loader.validate_split_config(config)
     
     return config
