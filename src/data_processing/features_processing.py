@@ -66,8 +66,7 @@ class HydroFeatureEngineer:
         # Evapotranspiração
         self.evapotranspiration_ma_windows = evapotranspiration_ma_windows or [7, 14, 30]
 
-        # Anomalias
-    
+        # Anomalias  
         self.anomaly_ma_windows = anomaly_ma_windows or [3, 7]
 
     @staticmethod
