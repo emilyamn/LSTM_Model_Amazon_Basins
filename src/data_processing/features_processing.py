@@ -7,19 +7,24 @@ import pathlib
 import sys
 import pandas as pd
 import numpy as np
+import yaml
 
-# Adicionar o caminho para importar config_loader
-# Supondo que utils está no mesmo nível que data_processing
+# Corrigir a importação do config_loader
 current_dir = pathlib.Path(__file__).parent
-utils_path = current_dir.parent / "utils"
-sys.path.insert(0, str(utils_path))
+project_root = current_dir.parent.parent  # Vai para src/data_processing/../.. (raiz do projeto)
+
+# Adicionar o src ao sys.path
+src_path = project_root / "src"
+if str(src_path) not in sys.path:
+    sys.path.insert(0, str(src_path))
 
 try:
-    from config_loader import load_feature_config
+    # Agora podemos importar de utils diretamente
+    from utils.config_loader import load_feature_config
     CONFIG_AVAILABLE = True
-except ImportError:
+except (ImportError, ModuleNotFoundError) as e:
     CONFIG_AVAILABLE = False
-    print("⚠️  Módulo config_loader não encontrado. Usando valores padrão.")
+    print(f"⚠️  Módulo config_loader não encontrado: {e}. Usando valores padrão.")
 
 
 class HydroFeatureEngineer:
@@ -359,7 +364,7 @@ class HydroFeatureEngineer:
                                        precip_fc_col, train_date_cutoff)
         
         return df
-    
+
     def process_multiple_stations(self,
                                  data_dict: Dict[int, pd.DataFrame],
                                  train_date_cutoff: Optional[str] = None) -> pd.DataFrame:
@@ -380,7 +385,8 @@ class HydroFeatureEngineer:
                 df_processed = self.process_station(df, station_id, train_date_cutoff)
                 processed_dfs.append(df_processed)
                 print(f"✓ Estação {station_id} processada")
-            except Exception as e:
+            except (ValueError, KeyError, TypeError, AttributeError, 
+                    MemoryError, pd.errors.EmptyDataError) as e:
                 print(f"✗ Erro ao processar estação {station_id}: {e}")
                 continue
         
@@ -422,7 +428,8 @@ def load_station_data(complete_series_dir: pathlib.Path,
             try:
                 df = pd.read_csv(file_path)
                 data_dict[station_id] = df
-            except Exception as e:
+            except (FileNotFoundError, PermissionError, pd.errors.EmptyDataError,
+                    pd.errors.ParserError, OSError, UnicodeDecodeError) as e:
                 print(f"✗ Erro ao carregar estação {station_id}: {e}")
         else:
             print(f"✗ Arquivo não encontrado: {file_path}")
@@ -501,7 +508,8 @@ def process_features(input_dir: pathlib.Path,
                 anomaly_ma_windows = config.get('anomaly_ma')
                 print(f"  - anomaly_ma carregado do config: {anomaly_ma_windows}")
                 
-        except Exception as e:
+        except (FileNotFoundError, PermissionError, yaml.YAMLError, 
+                KeyError, ValueError, OSError) as e:
             print(f"⚠️  Erro ao carregar configurações do arquivo: {e}")
             print("  Usando valores padrão ou fornecidos como parâmetro")
     
