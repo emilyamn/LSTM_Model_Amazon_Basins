@@ -1,2 +1,2 @@
 # Mini-curso-GitHub-Leo
-Material aula
+Repositório para previsão de vazão utilizando Redes Neurais do tipo LSTM
