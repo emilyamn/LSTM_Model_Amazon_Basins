@@ -2,11 +2,11 @@
 Módulo para feature engineering de dados hidrológicos.
 """
 
-import pandas as pd
-import numpy as np
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Optional
 import pathlib
 import sys
+import pandas as pd
+import numpy as np
 
 # Adicionar o caminho para importar config_loader
 # Supondo que utils está no mesmo nível que data_processing
@@ -541,7 +541,7 @@ def process_features(input_dir: pathlib.Path,
     output_path = output_dir / output_filename
     combined_df.to_csv(output_path)
     
-    print(f"\n✓ Features criadas com sucesso!")
+    print("\n✓ Features criadas com sucesso!")
     print(f"  Estações processadas: {len(data_dict)}")
     print(f"  Período: {combined_df.index.min().date()} a {combined_df.index.max().date()}")
     print(f"  Total de dias: {len(combined_df)}")

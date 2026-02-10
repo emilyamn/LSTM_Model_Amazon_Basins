@@ -2,11 +2,10 @@
 Módulo para carregar configurações de arquivos YAML.
 """
 
-import yaml
-import pathlib
-from typing import Dict, Any, Optional, Tuple
-import os
+from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
+import pathlib
+import yaml
 
 
 class ConfigLoader:
