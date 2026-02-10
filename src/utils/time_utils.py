@@ -3,8 +3,7 @@ Utilitários para cálculo de eixos temporais.
 """
 
 import numpy as np
-from typing import Tuple, Dict, List
-import torch
+from typing import Tuple, Dict
 
 def compute_time_axes(
     flow_window_config: Dict,
