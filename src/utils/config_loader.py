@@ -42,11 +42,11 @@ class ConfigLoader:
         config_path = self.config_dir / config_file
 
         if not config_path.exists():
-            available = [f.name for f in self.config_dir.glob("*.yaml") +
-                        self.config_dir.glob("*.yml")]
+            available = list(self.config_dir.glob("*.yaml")) + list(self.config_dir.glob("*.yml"))
+            available_names = [f.name for f in available]
             raise FileNotFoundError(
                 f"Arquivo de configuração não encontrado: {config_path}\n"
-                f"Arquivos disponíveis: {available}"
+                f"Arquivos disponíveis: {available_names}"
             )
 
         with open(config_path, 'r', encoding='utf-8') as f:
@@ -400,3 +400,49 @@ def load_split_config(validate: bool = True) -> Dict[str, Any]:
         loader.validate_split_config(config)
 
     return config
+
+def load_config(config_path: pathlib.Path) -> Dict[str, Any]:
+    """
+    Função de compatibilidade para carregar qualquer arquivo de configuração.
+    
+    Args:
+        config_path: Caminho completo para o arquivo de configuração
+    
+    Returns:
+        Dicionário com as configurações
+    """
+    if not config_path.exists():
+        raise FileNotFoundError(f"Arquivo de configuração não encontrado: {config_path}")
+    
+    with open(config_path, 'r', encoding='utf-8') as f:
+        config = yaml.safe_load(f)
+    
+    return config or {}
+
+def load_all_configs(config_dir: pathlib.Path) -> Dict[str, Dict[str, Any]]:
+    """
+    Carrega todos os arquivos de configuração de um diretório.
+    
+    Args:
+        config_dir: Diretório contendo os arquivos de configuração
+    
+    Returns:
+        Dicionário com todas as configurações carregadas
+    """
+    configs = {}
+    
+    # Arquivos comuns de configuração
+    config_files = {
+        'data': 'data_config.yaml',
+        'model': 'model_config.yaml',
+        'training': 'training_config.yaml'
+    }
+    
+    for key, filename in config_files.items():
+        filepath = config_dir / filename
+        if filepath.exists():
+            configs[key] = load_config(filepath)
+        else:
+            print(f"⚠️  Aviso: Arquivo {filename} não encontrado")
+    
+    return configs

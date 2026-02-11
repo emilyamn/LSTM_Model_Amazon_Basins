@@ -60,3 +60,16 @@ def move_sample_to_device(sample: Sample, device: str) -> Sample:
         forecast_date=sample.forecast_date,  # mantém numpy array
         date_index=sample.date_index,        # mantém numpy array
     )
+
+def get_device() -> str:
+    """
+    Retorna o dispositivo (CPU/GPU) disponível para PyTorch.
+    
+    Returns:
+        str: 'cuda' se GPU disponível, caso contrário 'cpu'
+    """
+    try:
+        import torch
+        return 'cuda' if torch.cuda.is_available() else 'cpu'
+    except ImportError:
+        return 'cpu'

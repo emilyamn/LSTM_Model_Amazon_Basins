@@ -269,7 +269,7 @@ def batch_interpolate_and_overwrite(
 
     if verbose:
         print(f"\n{'='*60}")
-        print(f"INTERPOLAÇÃO EM LOTE (COM SOBRESCRITA)")
+        print("INTERPOLAÇÃO EM LOTE (COM SOBRESCRITA)")
         print(f"Total de estações: {len(station_configs)}")
         print(f"{'='*60}")
 
@@ -297,7 +297,7 @@ def batch_interpolate_and_overwrite(
 
     if verbose:
         print(f"\n{'='*60}")
-        print(f"INTERPOLAÇÃO EM LOTE CONCLUÍDA")
+        print("INTERPOLAÇÃO EM LOTE CONCLUÍDA")
         print(f"Estações processadas: {len(results)}/{len(station_configs)}")
         print(f"Arquivos atualizados na pasta: {target_data_dir}")
         print(f"{'='*60}")

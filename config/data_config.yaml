@@ -87,6 +87,24 @@ static_keys:
   - slope_mean
   - AI_mean
 
+# Atributos estáticos das estações
+static_attributes:
+  10100000:
+    area: 100.5
+    elev_mean: 250.0
+    slope_mean: 2.5
+    AI_mean: 1.8
+  13150000:
+    area: 150.2
+    elev_mean: 300.0
+    slope_mean: 3.0
+    AI_mean: 2.0
+  14100000:
+    area: 200.8
+    elev_mean: 350.0
+    slope_mean: 3.5
+    AI_mean: 2.2
+    
 # Janelas para features (SEÇÃO OBRIGATÓRIA para config_loader.py)
 feature_windows:
   # Valores de k para API (OBRIGATÓRIO)
