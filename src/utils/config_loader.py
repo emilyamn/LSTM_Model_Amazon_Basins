@@ -175,7 +175,7 @@ class ConfigLoader:
 
         if missing_keys:
             raise ValueError(
-                f"❌ ERRO: Configurações de split obrigatórias faltando no arquivo data_config.yaml:\n"
+                f"ERRO: Configurações de split obrigatórias faltando no arquivo data_config.yaml:\n"
                 f"Chaves faltantes: {', '.join(missing_keys)}\n\n"
                 f"Por favor, adicione estas configurações à seção 'split_config'.\n"
                 f"Arquivo de configuração: {self.config_dir / 'data_config.yaml'}"
@@ -185,7 +185,7 @@ class ConfigLoader:
         total_ratio = split_config["train_ratio"] + split_config["val_ratio"] + split_config["test_ratio"]
         if abs(total_ratio - 1.0) > 0.001:
             raise ValueError(
-                f"❌ ERRO: A soma de train_ratio + val_ratio + test_ratio deve ser 1.0, mas é {total_ratio:.3f}\n"
+                f"ERRO: A soma de train_ratio + val_ratio + test_ratio deve ser 1.0, mas é {total_ratio:.3f}\n"
                 f"Por favor, corrija no arquivo data_config.yaml"
             )
 
