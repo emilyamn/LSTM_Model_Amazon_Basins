@@ -2,8 +2,6 @@
 Módulo principal para previsão hidrológica.
 """
 
-__version__ = "1.0.0"
-__author__ = "Sistema de Previsão Hidrológica"
 
 # Importações principais
 from .data.data_structures import Scaler, Sample
@@ -21,6 +19,12 @@ from .utils.config_loader import (
 )
 from .utils.data_utils import custom_collate_fn, move_sample_to_device, get_device
 from .utils.time_utils import compute_time_axes
+from .result_analysis import (
+    compute_flow_metrics,
+    print_metrics_summary,
+    plot_predictions_with_context,
+    plot_metrics_by_horizon
+)
 
 __all__ = [
     # Data structures
@@ -38,4 +42,9 @@ __all__ = [
     "get_device", "custom_collate_fn", "move_sample_to_device",
     # Utils - Time
     "compute_time_axes",
+    # Result Analysis
+    "compute_flow_metrics",
+    "print_metrics_summary",
+    "plot_predictions_with_context",
+    "plot_metrics_by_horizon",
 ]
