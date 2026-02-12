@@ -107,19 +107,19 @@ static_attributes:
     
 # Janelas para features (SEÇÃO OBRIGATÓRIA para config_loader.py)
 feature_windows:
-  # Valores de k para API (OBRIGATÓRIO)
+  # Valores de k para API
   api_k_list: [0.70, 0.80, 0.85, 0.90, 0.92, 0.95]
   
-  # Médias móveis de precipitação (OBRIGATÓRIO)
+  # Médias móveis de precipitação
   precipitation_ma: [3, 7, 15]
   
-  # Acumulados de precipitação (OBRIGATÓRIO)
+  # Acumulados de precipitação
   precipitation_cum: [3, 5, 7, 10]
   
-  # Médias móveis de evapotranspiração (OBRIGATÓRIO)
+  # Médias móveis de evapotranspiração
   evapotranspiration_ma: [7, 14, 30]
   
-  # Médias móveis de anomalias (OBRIGATÓRIO)
+  # Médias móveis de anomalias
   anomaly_ma: [3, 7]
   
   # Opcionais (se não definidos, usam os mesmos valores de precipitação)
@@ -128,15 +128,15 @@ feature_windows:
 
 # Configurações de split (train/val/test)
 split_config:
-  # Proporções devem somar 1.0 (OBRIGATÓRIO)
+  # Proporções devem somar 1.0
   train_ratio: 0.95    # 95% para treino
   val_ratio: 0.025     # 2.5% para validação
   test_ratio: 0.025    # 2.5% para teste
   
-  # Gap entre conjuntos (em dias) (OBRIGATÓRIO)
+  # Gap entre conjuntos (em dias)
   gap: 128
   
-  # Stride para janelas deslizantes (OBRIGATÓRIO)
+  # Stride para janelas deslizantes
   window_stride: 1
 
 # Caminhos dos dados
