@@ -2,8 +2,8 @@
 Utilitários para salvar e carregar checkpoints do modelo e metadados.
 """
 
-import torch
 from typing import Dict, Any, Tuple
+import torch
 from src.model.architecture import Seq2SeqHydro
 
 def save_checkpoint(
@@ -14,7 +14,7 @@ def save_checkpoint(
 ):
     """
     Salva o modelo treinado junto com metadados essenciais para inferência.
-    
+
     Args:
         model: Instância do modelo treinado
         inference_meta: Dicionário com scalers e configs do dataset
@@ -32,20 +32,20 @@ def save_checkpoint(
 def load_checkpoint(path: str, device: str = "cpu") -> Tuple[Seq2SeqHydro, Dict[str, Any]]:
     """
     Carrega um checkpoint e reconstrói o modelo.
-    
+
     Returns:
         model: Modelo carregado e em modo eval()
         inference_meta: Metadados (scalers, configs, etc.)
     """
     checkpoint = torch.load(path, map_location=device)
-    
+
     # Reconstruir arquitetura
     config = checkpoint["model_config"]
     model = Seq2SeqHydro(**config)
-    
+
     # Carregar pesos
     model.load_state_dict(checkpoint["model_state_dict"])
     model.to(device)
     model.eval()
-    
+
     return model, checkpoint["inference_meta"]
