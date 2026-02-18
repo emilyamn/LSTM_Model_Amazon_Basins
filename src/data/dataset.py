@@ -400,4 +400,3 @@ def create_temporal_split_with_gap(
         val_indices = list(range(split_idx, n))
 
     return Subset(dataset, train_indices), Subset(dataset, val_indices)
-
