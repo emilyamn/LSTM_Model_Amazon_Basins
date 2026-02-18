@@ -14,7 +14,7 @@ from src.utils.time_utils import compute_time_axes
 
 class HydroDataset(Dataset):
     """Dataset para dados hidrológicos com suporte a múltiplas estações."""
-    
+
     def __init__(
         self,
         df: pd.DataFrame,
@@ -29,22 +29,6 @@ class HydroDataset(Dataset):
         static_keys: List[str],
         window_stride: int = 1,
     ):
-        """
-        Inicializa o dataset hidrológico.
-        
-        Args:
-            df: DataFrame com todos os dados
-            stations: Lista de IDs das estações
-            static_attrs: Dicionário com atributos estáticos por estação
-            train_indices: Índices usados para cálculo de estatísticas
-            forecast_cols: Dicionário com nomes das colunas de forecast
-            flow_window_config: Configuração de janelas para fluxo
-            climate_window_config: Configuração de janelas para clima
-            temporal_features: Lista de features temporais
-            api_k_list: Lista de valores k para API
-            static_keys: Chaves dos atributos estáticos
-            window_stride: Passo entre windows consecutivos
-        """
         self.df = df
         self.stations = stations
         self.static_attrs = static_attrs
@@ -59,10 +43,10 @@ class HydroDataset(Dataset):
         # Escaladores dinâmicos
         self.flow_scalers = {}
         self.climate_scalers = {}
-        
+
         # Registrar escaladores
         self._register_scalers(train_indices)
-        
+
         # Calcular eixos temporais
         (
             self.encoder_offsets,
@@ -73,11 +57,12 @@ class HydroDataset(Dataset):
 
         self.encoder_length = len(self.encoder_offsets)
         self.decoder_length = len(self.decoder_offsets)
+
+        # Construir índices válidos (com verificação de NaNs)
         self.valid_centers = self._build_valid_indices()
-        
+
     def _register_scalers(self, train_indices: np.ndarray):
         """Registra escaladores para todas as features."""
-        # Helper para criar escalador se a coluna existir
         def register_scaler(col_name):
             if col_name in self.df.columns:
                 self.climate_scalers[col_name] = compute_scaler(
@@ -91,7 +76,7 @@ class HydroDataset(Dataset):
                 self.df[q_col].iloc[train_indices].to_numpy()
             )
 
-            # 2. Clima Básico (Obs e Forecast)
+            # 2. Clima Básico
             precip_obs = f"precipitation_chirps_{st}"
             et_obs = f"potential_evapotransp_gleam_{st}"
             register_scaler(precip_obs)
@@ -101,7 +86,7 @@ class HydroDataset(Dataset):
             register_scaler(precip_fc)
             register_scaler(et_fc)
 
-            # 3. Médias Móveis e Acumulados (Precipitação)
+            # 3. Médias Móveis e Acumulados
             for w in (3, 7, 15):
                 register_scaler(f"precipitation_chirps_ma{w}_{st}")
                 register_scaler(f"precipitation_forecast_ma{w}_{st}")
@@ -120,7 +105,7 @@ class HydroDataset(Dataset):
             register_scaler(f"dQ_dt_{st}")
             register_scaler(f"dP_dt_{st}")
             register_scaler(f"dP_dt_forecast_{st}")
-            
+
             if f"regime_state_{st}" in self.df.columns:
                 self.climate_scalers[f"regime_state_{st}"] = compute_scaler(
                     self.df[f"regime_state_{st}"].iloc[train_indices].astype(np.float32).to_numpy()
@@ -135,15 +120,40 @@ class HydroDataset(Dataset):
         for key in self.static_keys:
             vals = np.array([self.static_attrs[st][key] for st in self.stations], dtype=np.float32)
             self.static_scalers[key] = compute_scaler(vals)
-            
+
     def _build_valid_indices(self) -> List[int]:
-        """Constrói lista de índices válidos para centers."""
+        """
+        Constrói lista de índices válidos para centers.
+        Regra: A janela inteira (Encoder + Decoder) não pode ter NaNs nas colunas de vazão.
+        """
         enc_min_offset = int(self.encoder_offsets[0])
         dec_max_offset = int(self.decoder_offsets[-1])
+
+        # Janela total que precisa ser válida
+        window_size = dec_max_offset - enc_min_offset + 1
+
+        # 1. Identificar colunas de vazão
+        flow_cols = [f"Q_{st}" for st in self.stations]
+
+        # 2. Máscara booleana: True se a linha tem TODAS as vazões válidas
+        valid_rows = self.df[flow_cols].notna().all(axis=1).astype(int)
+
+        # 3. Rolling window para verificar se o intervalo inteiro é válido
+        rolling_valid = valid_rows.rolling(window=window_size).min()
+        rolling_valid_np = rolling_valid.to_numpy()
+
         start = -enc_min_offset
         end = len(self.df) - dec_max_offset
-        centers = list(range(start, end, self.window_stride))
-        return centers
+
+        valid_centers = []
+
+        for c in range(start, end, self.window_stride):
+            check_idx = c + dec_max_offset
+            if 0 <= check_idx < len(rolling_valid_np):
+                if rolling_valid_np[check_idx] == 1.0:
+                    valid_centers.append(c)
+
+        return valid_centers
 
     def __len__(self):
         return len(self.valid_centers)
@@ -155,14 +165,15 @@ class HydroDataset(Dataset):
         values = np.full_like(offsets, fill_value=np.nan, dtype=np.float32)
         values[clip_mask] = series.iloc[idxs[clip_mask]].to_numpy()
         return values
-    
+
     def _transform_and_append(self, col_name: str, center: int, offsets: np.ndarray, target_list: List[np.ndarray]):
         """Helper para cortar, escalar e adicionar à lista se a coluna existir."""
         if col_name in self.df.columns:
             series = self._slice_series(self.df[col_name], center, offsets)
             scaler = self.climate_scalers[col_name]
+            # Sem nan_to_num, pois assumimos dados climáticos completos
             norm_vals = scaler.transform(
-                torch.from_numpy(np.nan_to_num(series, nan=scaler.mean)).float()
+                torch.from_numpy(series).float()
             ).numpy()
             target_list.append(norm_vals)
 
@@ -183,7 +194,6 @@ class HydroDataset(Dataset):
 
                 aligned_values = np.full(len(global_offsets), np.nan, dtype=np.float32)
                 aligned_mask = np.zeros(len(global_offsets), dtype=np.float32)
-                in_window = np.isin(global_offsets, spec_offsets)
 
                 for local_idx, spec_off in enumerate(spec_offsets):
                     match = np.where(global_offsets == spec_off)[0]
@@ -194,17 +204,10 @@ class HydroDataset(Dataset):
                             aligned_values[slot] = val
                             aligned_mask[slot] = 1.0
 
-                last_val: Optional[float] = None
-                for idx in range(len(global_offsets)):
-                    if not in_window[idx]:
-                        continue
-                    if aligned_mask[idx] == 1.0:
-                        last_val = aligned_values[idx]
-                    elif last_val is not None:
-                        aligned_values[idx] = last_val
-                        aligned_mask[idx] = 1.0
+                # Sem loop de forward fill
 
                 scaler = self.flow_scalers[f"Q_{spec['source']}"]
+                # nan_to_num mantido apenas para padding estrutural (zeros)
                 norm_values = scaler.transform(
                     torch.from_numpy(np.nan_to_num(aligned_values, nan=scaler.mean)).float()
                 ).numpy()
@@ -222,40 +225,32 @@ class HydroDataset(Dataset):
 
         for station in self.stations:
             if stage == "encoder":
-                # ENCODER: Observados + Features Históricas
                 self._add_encoder_features(station, center, offsets, obs_arrays)
             else:
-                # DECODER: Apenas Forecasts
                 self._add_decoder_features(station, center, offsets, fc_arrays)
 
         return obs_arrays, fc_arrays
-    
+
     def _add_encoder_features(self, station: int, center: int, offsets: np.ndarray, arrays: List[np.ndarray]):
         """Adiciona features do encoder."""
-        # 1. Clima Básico
         self._transform_and_append(f"precipitation_chirps_{station}", center, offsets, arrays)
         self._transform_and_append(f"potential_evapotransp_gleam_{station}", center, offsets, arrays)
 
-        # 2. Médias/Acumulados
         for w in (3, 7, 15):
             self._transform_and_append(f"precipitation_chirps_ma{w}_{station}", center, offsets, arrays)
         for w in (3, 5, 7, 10):
             self._transform_and_append(f"precipitation_chirps_cum{w}_{station}", center, offsets, arrays)
 
-        # 3. APIs
         for k in self.api_k_list:
             tag = f"k{int(round(k*100)):02d}"
             self._transform_and_append(f"api_chirps_{tag}_{station}", center, offsets, arrays)
 
-        # 4. Derivadas e Regime
         self._transform_and_append(f"dQ_dt_{station}", center, offsets, arrays)
         self._transform_and_append(f"dP_dt_{station}", center, offsets, arrays)
         self._transform_and_append(f"regime_state_{station}", center, offsets, arrays)
-
-        # 5. Log Anomaly
         self._transform_and_append(f"log_anomaly_{station}", center, offsets, arrays)
         self._transform_and_append(f"log_anomaly_ma3_{station}", center, offsets, arrays)
-    
+
     def _add_decoder_features(self, station: int, center: int, offsets: np.ndarray, arrays: List[np.ndarray]):
         """Adiciona features do decoder."""
         fc_p_name, fc_e_name = self.forecast_cols[station]
@@ -315,26 +310,23 @@ class HydroDataset(Dataset):
     def __getitem__(self, idx):
         center = self.valid_centers[idx]
 
-        # Construir todos os blocos
         flow_enc, mask_enc = self._build_flow_block(center, "encoder")
         flow_dec, mask_dec = self._build_flow_block(center, "decoder")
-        
+
         climate_obs_enc, climate_fc_enc = self._build_climate_block(center, "encoder")
         climate_obs_dec, climate_fc_dec = self._build_climate_block(center, "decoder")
-        
+
         temp_enc = self._build_temporal_block(center, "encoder")
         temp_dec = self._build_temporal_block(center, "decoder")
         static_vec = self._build_static_vector(center)
         target = self._build_target(center)
 
-        # Empilhar features
         encoder_dyn = np.stack(flow_enc + climate_obs_enc, axis=-1)
         decoder_dyn = np.stack(flow_dec + climate_fc_dec, axis=-1)
 
         mask_enc = np.stack(mask_enc, axis=-1)
         mask_dec = np.stack(mask_dec, axis=-1)
 
-        # Última observação (baseline)
         last_obs = []
         for st in self.stations:
             scaler = self.flow_scalers[f"Q_{st}"]
@@ -342,13 +334,12 @@ class HydroDataset(Dataset):
             last_obs.append(scaler.transform(torch.tensor(last_value).float()).item())
         last_obs = torch.tensor(last_obs, dtype=torch.float32)
 
-        # Data da previsão
         forecast_start_idx = center + self.decoder_offsets[self.decoder_history]
         if 0 <= forecast_start_idx < len(self.df):
             forecast_date = self.df.index[forecast_start_idx]
         else:
             forecast_date = None
-        
+
         return Sample(
             encoder_dyn=torch.tensor(encoder_dyn, dtype=torch.float32),
             decoder_dyn=torch.tensor(decoder_dyn, dtype=torch.float32),
@@ -371,20 +362,11 @@ def create_temporal_split_with_gap(
 ) -> Tuple[Subset, Subset]:
     """
     Cria split temporal com gap para evitar sobreposição.
-    
-    Args:
-        dataset: Dataset hidrológico
-        train_ratio: Proporção de treino
-        gap: Gap mínimo entre treino e validação
-        
-    Returns:
-        Tupla com (train_subset, val_subset)
     """
     n = len(dataset)
     split_idx = int(n * train_ratio)
     split_idx = min(max(split_idx, 1), n - 1)
 
-    # gap mínimo em centers: dec_max - enc_min + 1
     enc_min = int(dataset.encoder_offsets[0])
     dec_max = int(dataset.decoder_offsets[-1])
     min_gap_centers = dec_max - enc_min + 1
