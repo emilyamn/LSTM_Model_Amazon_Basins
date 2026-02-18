@@ -2,14 +2,19 @@
 Módulo principal para previsão hidrológica.
 """
 
-
-# Importações principais
+# Importações principais - Data
 from .data.data_structures import Scaler, Sample
 from .data.dataset import HydroDataset, create_temporal_split_with_gap
+
+# Importações principais - Model
 from .model.architecture import Seq2SeqHydro
 from .model.layers import StaticEmbedding
+
+# Importações principais - Training
 from .training.trainer import train_model, predict_autoregressive
 from .training.losses import multi_step_loss
+
+# Importações principais - Utils
 from .utils.config_loader import (
     ConfigLoader, 
     load_feature_config, 
@@ -19,6 +24,9 @@ from .utils.config_loader import (
 )
 from .utils.data_utils import custom_collate_fn, move_sample_to_device, get_device
 from .utils.time_utils import compute_time_axes
+from .utils.serialization import save_checkpoint, load_checkpoint
+
+# Importações principais - Result Analysis
 from .result_analysis import (
     compute_flow_metrics,
     print_metrics_summary,
@@ -51,6 +59,8 @@ __all__ = [
     "get_device", "custom_collate_fn", "move_sample_to_device",
     # Utils - Time
     "compute_time_axes",
+    # Utils - Serialization
+    "save_checkpoint", "load_checkpoint",
     # Result Analysis
     "compute_flow_metrics",
     "print_metrics_summary",

@@ -11,6 +11,7 @@ from .config_loader import (
 )
 from .time_utils import compute_time_axes
 from .data_utils import custom_collate_fn, move_sample_to_device, get_device
+from .serialization import save_checkpoint, load_checkpoint
 
 __all__ = [
     'ConfigLoader',
@@ -22,4 +23,6 @@ __all__ = [
     'custom_collate_fn',
     'move_sample_to_device',
     'get_device',
+    'save_checkpoint',
+    'load_checkpoint',
 ]
