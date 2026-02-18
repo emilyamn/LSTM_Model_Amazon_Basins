@@ -26,6 +26,15 @@ from .result_analysis import (
     plot_metrics_by_horizon
 )
 
+# Importações principais - LinAR
+from .linar import (
+    interpolate_linar,
+    interpolate_linear,
+    convert_to_series,
+    resample_timeseries,
+    group_nans
+)
+
 __all__ = [
     # Data structures
     "Scaler", "Sample",
@@ -47,4 +56,10 @@ __all__ = [
     "print_metrics_summary",
     "plot_predictions_with_context",
     "plot_metrics_by_horizon",
+    # LinAR Interpolation
+    "interpolate_linar",
+    "interpolate_linear",
+    "convert_to_series",
+    "resample_timeseries",
+    "group_nans",
 ]
