@@ -2,11 +2,11 @@
 Dataset hidrológico para treino de modelos de deep learning.
 """
 
+from typing import Dict, List, Tuple, Optional
+from torch.utils.data import Dataset, Subset
+import torch
 import numpy as np
 import pandas as pd
-import torch
-from torch.utils.data import Dataset, Subset
-from typing import Dict, List, Tuple, Optional
 
 from src.data.data_structures import Scaler, Sample, compute_scaler
 from src.utils.time_utils import compute_time_axes
@@ -25,7 +25,7 @@ class HydroDataset(Dataset):
         flow_window_config: Dict,
         climate_window_config: Dict,
         temporal_features: List[str],
-        api_k_list: List[float],
+        api_k_list: List[float], # Mantido para compatibilidade, mas não limita mais a busca
         static_keys: List[str],
         window_stride: int = 1,
     ):
@@ -61,6 +61,19 @@ class HydroDataset(Dataset):
         # Construir índices válidos (com verificação de NaNs)
         self.valid_centers = self._build_valid_indices()
 
+    def _get_cols_by_prefix(self, prefix: str, station: int) -> List[str]:
+        """
+        Retorna todas as colunas do DF que começam com 'prefix' e terminam com '_{station}'.
+        Ordena alfabeticamente para garantir determinismo.
+        """
+        suffix = f"_{station}"
+        cols = [
+            c for c in self.df.columns
+            if c.startswith(prefix) and c.endswith(suffix)
+        ]
+        cols.sort()
+        return cols
+
     def _register_scalers(self, train_indices: np.ndarray):
         """Registra escaladores para todas as features."""
         def register_scaler(col_name):
@@ -86,20 +99,26 @@ class HydroDataset(Dataset):
             register_scaler(precip_fc)
             register_scaler(et_fc)
 
-            # 3. Médias Móveis e Acumulados
-            for w in (3, 7, 15):
-                register_scaler(f"precipitation_chirps_ma{w}_{st}")
-                register_scaler(f"precipitation_forecast_ma{w}_{st}")
+            # 3. Médias Móveis e Acumulados (Dinâmico)
+            # Busca qualquer coluna que comece com o padrão, independente da janela (3, 4, 10...)
+            for col in self._get_cols_by_prefix("precipitation_chirps_ma", st):
+                register_scaler(col)
 
-            for w in (3, 5, 7, 10):
-                register_scaler(f"precipitation_chirps_cum{w}_{st}")
-                register_scaler(f"precipitation_forecast_cum{w}_{st}")
+            for col in self._get_cols_by_prefix("precipitation_forecast_ma", st):
+                register_scaler(col)
 
-            # 4. APIs
-            for k in self.api_k_list:
-                tag = f"k{int(round(k*100)):02d}"
-                register_scaler(f"api_chirps_{tag}_{st}")
-                register_scaler(f"api_forecast_{tag}_{st}")
+            for col in self._get_cols_by_prefix("precipitation_chirps_cum", st):
+                register_scaler(col)
+
+            for col in self._get_cols_by_prefix("precipitation_forecast_cum", st):
+                register_scaler(col)
+
+            # 4. APIs (Dinâmico)
+            for col in self._get_cols_by_prefix("api_chirps_k", st):
+                register_scaler(col)
+
+            for col in self._get_cols_by_prefix("api_forecast_k", st):
+                register_scaler(col)
 
             # 5. Derivadas e Regime
             register_scaler(f"dQ_dt_{st}")
@@ -113,7 +132,9 @@ class HydroDataset(Dataset):
 
             # 6. Log-Anomaly
             register_scaler(f"log_anomaly_{st}")
-            register_scaler(f"log_anomaly_ma3_{st}")
+            # Busca dinamicamente médias móveis da anomalia (ex: log_anomaly_ma3, ma7...)
+            for col in self._get_cols_by_prefix("log_anomaly_ma", st):
+                register_scaler(col)
 
         # Escaladores estáticos
         self.static_scalers: Dict[str, Scaler] = {}
@@ -129,16 +150,10 @@ class HydroDataset(Dataset):
         enc_min_offset = int(self.encoder_offsets[0])
         dec_max_offset = int(self.decoder_offsets[-1])
 
-        # Janela total que precisa ser válida
         window_size = dec_max_offset - enc_min_offset + 1
-
-        # 1. Identificar colunas de vazão
         flow_cols = [f"Q_{st}" for st in self.stations]
 
-        # 2. Máscara booleana: True se a linha tem TODAS as vazões válidas
         valid_rows = self.df[flow_cols].notna().all(axis=1).astype(int)
-
-        # 3. Rolling window para verificar se o intervalo inteiro é válido
         rolling_valid = valid_rows.rolling(window=window_size).min()
         rolling_valid_np = rolling_valid.to_numpy()
 
@@ -171,7 +186,6 @@ class HydroDataset(Dataset):
         if col_name in self.df.columns:
             series = self._slice_series(self.df[col_name], center, offsets)
             scaler = self.climate_scalers[col_name]
-            # Sem nan_to_num, pois assumimos dados climáticos completos
             norm_vals = scaler.transform(
                 torch.from_numpy(series).float()
             ).numpy()
@@ -204,10 +218,7 @@ class HydroDataset(Dataset):
                             aligned_values[slot] = val
                             aligned_mask[slot] = 1.0
 
-                # Sem loop de forward fill
-
                 scaler = self.flow_scalers[f"Q_{spec['source']}"]
-                # nan_to_num mantido apenas para padding estrutural (zeros)
                 norm_values = scaler.transform(
                     torch.from_numpy(np.nan_to_num(aligned_values, nan=scaler.mean)).float()
                 ).numpy()
@@ -232,40 +243,48 @@ class HydroDataset(Dataset):
         return obs_arrays, fc_arrays
 
     def _add_encoder_features(self, station: int, center: int, offsets: np.ndarray, arrays: List[np.ndarray]):
-        """Adiciona features do encoder."""
+        """Adiciona features do encoder de forma dinâmica."""
+        # 1. Clima Básico
         self._transform_and_append(f"precipitation_chirps_{station}", center, offsets, arrays)
         self._transform_and_append(f"potential_evapotransp_gleam_{station}", center, offsets, arrays)
 
-        for w in (3, 7, 15):
-            self._transform_and_append(f"precipitation_chirps_ma{w}_{station}", center, offsets, arrays)
-        for w in (3, 5, 7, 10):
-            self._transform_and_append(f"precipitation_chirps_cum{w}_{station}", center, offsets, arrays)
+        # 2. Médias Móveis e Acumulados (Dinâmico)
+        for col in self._get_cols_by_prefix("precipitation_chirps_ma", station):
+            self._transform_and_append(col, center, offsets, arrays)
 
-        for k in self.api_k_list:
-            tag = f"k{int(round(k*100)):02d}"
-            self._transform_and_append(f"api_chirps_{tag}_{station}", center, offsets, arrays)
+        for col in self._get_cols_by_prefix("precipitation_chirps_cum", station):
+            self._transform_and_append(col, center, offsets, arrays)
 
+        # 3. APIs (Dinâmico)
+        for col in self._get_cols_by_prefix("api_chirps_k", station):
+            self._transform_and_append(col, center, offsets, arrays)
+
+        # 4. Derivadas e Regime
         self._transform_and_append(f"dQ_dt_{station}", center, offsets, arrays)
         self._transform_and_append(f"dP_dt_{station}", center, offsets, arrays)
         self._transform_and_append(f"regime_state_{station}", center, offsets, arrays)
+
+        # 5. Log Anomaly
         self._transform_and_append(f"log_anomaly_{station}", center, offsets, arrays)
-        self._transform_and_append(f"log_anomaly_ma3_{station}", center, offsets, arrays)
+        for col in self._get_cols_by_prefix("log_anomaly_ma", station):
+            self._transform_and_append(col, center, offsets, arrays)
 
     def _add_decoder_features(self, station: int, center: int, offsets: np.ndarray, arrays: List[np.ndarray]):
-        """Adiciona features do decoder."""
+        """Adiciona features do decoder de forma dinâmica."""
         fc_p_name, fc_e_name = self.forecast_cols[station]
         self._transform_and_append(fc_p_name, center, offsets, arrays)
         self._transform_and_append(fc_e_name, center, offsets, arrays)
 
-        for w in (3, 7, 15):
-            self._transform_and_append(f"precipitation_forecast_ma{w}_{station}", center, offsets, arrays)
+        # Médias e Acumulados de Forecast (Dinâmico)
+        for col in self._get_cols_by_prefix("precipitation_forecast_ma", station):
+            self._transform_and_append(col, center, offsets, arrays)
 
-        for w in (3, 5, 7, 10):
-            self._transform_and_append(f"precipitation_forecast_cum{w}_{station}", center, offsets, arrays)
+        for col in self._get_cols_by_prefix("precipitation_forecast_cum", station):
+            self._transform_and_append(col, center, offsets, arrays)
 
-        for k in self.api_k_list:
-            tag = f"k{int(round(k*100)):02d}"
-            self._transform_and_append(f"api_forecast_{tag}_{station}", center, offsets, arrays)
+        # APIs de Forecast (Dinâmico)
+        for col in self._get_cols_by_prefix("api_forecast_k", station):
+            self._transform_and_append(col, center, offsets, arrays)
 
         self._transform_and_append(f"dP_dt_forecast_{station}", center, offsets, arrays)
 
@@ -356,8 +375,8 @@ class HydroDataset(Dataset):
 
 
 def create_temporal_split_with_gap(
-    dataset: HydroDataset, 
-    train_ratio: float = 0.95, 
+    dataset: HydroDataset,
+    train_ratio: float = 0.95,
     gap: Optional[int] = None
 ) -> Tuple[Subset, Subset]:
     """
@@ -376,8 +395,9 @@ def create_temporal_split_with_gap(
 
     train_indices = list(range(0, split_idx))
     val_indices = list(range(val_start, n))
-    
+
     if len(val_indices) == 0:
         val_indices = list(range(split_idx, n))
-    
+
     return Subset(dataset, train_indices), Subset(dataset, val_indices)
+
