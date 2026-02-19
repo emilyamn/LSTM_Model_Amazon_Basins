@@ -5,6 +5,7 @@ Utilitários para salvar e carregar checkpoints do modelo e metadados.
 from typing import Dict, Any, Tuple
 import torch
 from src.model.architecture import Seq2SeqHydro
+from src.data.data_structures import Scaler
 
 def save_checkpoint(
     model: Seq2SeqHydro,
@@ -37,7 +38,15 @@ def load_checkpoint(path: str, device: str = "cpu") -> Tuple[Seq2SeqHydro, Dict[
         model: Modelo carregado e em modo eval()
         inference_meta: Metadados (scalers, configs, etc.)
     """
-    checkpoint = torch.load(path, map_location=device)
+    # Adiciona Scaler à lista de globais seguros para carregar com weights_only=True
+    # Isso é necessário para PyTorch 2.6+ que restringe o unpickling por segurança
+    try:
+        with torch.serialization.safe_globals([Scaler]):
+            checkpoint = torch.load(path, map_location=device, weights_only=True)
+    except (AttributeError, TypeError):
+        # Fallback para versões antigas do PyTorch ou se safe_globals falhar
+        print("⚠️ Aviso: Carregando com weights_only=False (menos seguro, mas compatível)")
+        checkpoint = torch.load(path, map_location=device, weights_only=False)
 
     # Reconstruir arquitetura
     config = checkpoint["model_config"]
