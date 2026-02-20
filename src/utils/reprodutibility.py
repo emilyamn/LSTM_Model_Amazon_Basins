@@ -1,7 +1,11 @@
-import torch
-import numpy as np
+"""
+Garantir reprodutibilidade ao inicializar a rede com pesos idênticos
+"""
+
 import random
 import os
+import torch
+import numpy as np
 
 def set_seed(seed: int = 42):
     """Fixa as sementes para garantir reprodutibilidade."""

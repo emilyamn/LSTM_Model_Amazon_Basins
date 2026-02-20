@@ -4,6 +4,7 @@ Utilitários para salvar e carregar checkpoints do modelo e metadados.
 
 from typing import Dict, Any, Tuple
 import torch
+import pickle
 from src.model.architecture import Seq2SeqHydro
 from src.data.data_structures import Scaler
 
@@ -38,13 +39,16 @@ def load_checkpoint(path: str, device: str = "cpu") -> Tuple[Seq2SeqHydro, Dict[
         model: Modelo carregado e em modo eval()
         inference_meta: Metadados (scalers, configs, etc.)
     """
-    # Adiciona Scaler à lista de globais seguros para carregar com weights_only=True
+    # Tenta carregar de forma segura primeiro (PyTorch 2.6+)
     try:
+        # Adiciona Scaler à lista de globais seguros
         with torch.serialization.safe_globals([Scaler]):
             checkpoint = torch.load(path, map_location=device, weights_only=True)
-    except (AttributeError, TypeError):
-        # Fallback para versões antigas do PyTorch ou se safe_globals falhar
-        print("⚠️ Aviso: Carregando com weights_only=False (menos seguro, mas compatível)")
+    except (AttributeError, TypeError, pickle.UnpicklingError, RuntimeError) as e:
+        # Se falhar (por exemplo, numpy scalars não permitidos ou versão antiga),
+        # faz fallback para o método padrão (weights_only=False)
+        print(f"⚠️ Aviso: Carregamento seguro falhou ({str(e)}).")
+        print("🔄 Tentando carregar com weights_only=False (necessário para checkpoints antigos ou com tipos complexos)...")
         checkpoint = torch.load(path, map_location=device, weights_only=False)
 
     # Reconstruir arquitetura
