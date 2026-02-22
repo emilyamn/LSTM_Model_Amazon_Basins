@@ -7,7 +7,6 @@ import pathlib
 import sys
 import pandas as pd
 import numpy as np
-import yaml
 
 # Corrigir a importação do config_loader
 current_dir = pathlib.Path(__file__).parent
