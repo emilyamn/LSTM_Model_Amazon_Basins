@@ -10,12 +10,14 @@ from .interpolate_series import (
     batch_interpolate_and_overwrite
 )
 
-from .features_processing import HydroFeatureEngineer, process_features, load_station_data
 from .working_with_forecast import ForecastGenerator, generate_forecast_files
+from .import_and_merge_forecast import load_forecast_data, merge_forecast_with_observed
 
 __all__ = [
     'DataPreprocessor',
     'batch_interpolate_and_overwrite',
     'ForecastGenerator',
     'generate_forecast_files',
+    'load_forecast_data',
+    'merge_forecast_with_observed',
 ]
