@@ -387,12 +387,14 @@ def load_forecast_data(forecast_dir: pathlib.Path,
             continue
 
         try:
-            # Carregar precipitação
+            # Carregar precipitação COM CONVERSÃO DE DATA
             df_precip = pd.read_csv(precip_file, parse_dates=['date'])
+            df_precip['date'] = pd.to_datetime(df_precip['date'])  # ← GARANTIR datetime
             df_precip = df_precip[['date', 'precipitation_forecast']]
 
-            # Carregar ET
+            # Carregar ET COM CONVERSÃO DE DATA
             df_et = pd.read_csv(et_file, parse_dates=['date'])
+            df_et['date'] = pd.to_datetime(df_et['date'])  # ← GARANTIR datetime
             df_et = df_et[['date', 'et_forecast']]
 
             # Merge
@@ -424,6 +426,10 @@ def merge_observed_and_forecast(
 
         df_obs = observed_dict[station_id].copy()
         df_fc = forecast_dict[station_id].copy()
+
+        # GARANTIR QUE AMBAS AS COLUNAS 'date' SEJAM datetime
+        df_obs['date'] = pd.to_datetime(df_obs['date'])
+        df_fc['date'] = pd.to_datetime(df_fc['date'])
 
         # Merge por data
         df_merged = df_obs.merge(df_fc, on='date', how='left')
