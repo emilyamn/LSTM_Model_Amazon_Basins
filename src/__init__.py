@@ -16,22 +16,36 @@ from .training.losses import multi_step_loss
 
 # Importações principais - Utils
 from .utils.config_loader import (
-    ConfigLoader, 
-    load_feature_config, 
+    ConfigLoader,
+    load_feature_config,
     load_split_config,
     load_config,
     load_all_configs
 )
-from .utils.data_utils import custom_collate_fn, move_sample_to_device, get_device
-from .utils.time_utils import compute_time_axes
-from .utils.serialization import save_checkpoint, load_checkpoint
+
+from .utils.data_utils import (
+    custom_collate_fn,
+    move_sample_to_device,
+    get_device
+)
+
+from .utils.time_utils import (
+    compute_time_axes
+)
+
+from .utils.serialization import (
+    save_checkpoint,
+    load_checkpoint
+)
 
 # Importações principais - Result Analysis
 from .result_analysis import (
     compute_flow_metrics,
     print_metrics_summary,
     plot_predictions_with_context,
-    plot_metrics_by_horizon
+    plot_metrics_by_horizon,
+    plot_full_series_with_d1_forecast,
+    plot_predictions_extremes
 )
 
 # Importações principais - LinAR
@@ -66,6 +80,8 @@ __all__ = [
     "print_metrics_summary",
     "plot_predictions_with_context",
     "plot_metrics_by_horizon",
+    "plot_full_series_with_d1_forecast",
+    "plot_predictions_extremes",
     # LinAR Interpolation
     "interpolate_linar",
     "interpolate_linear",
