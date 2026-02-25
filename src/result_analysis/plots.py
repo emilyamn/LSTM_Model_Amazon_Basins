@@ -220,83 +220,59 @@ def plot_full_series_with_d1_forecast(
     baseline_last: Optional[np.ndarray] = None,
     figsize: tuple = (16, 5)
 ) -> None:
-    """
-    Plota série temporal completa mostrando apenas previsões D+1 (um dia à frente).
-
-    Útil para visualizar o desempenho ao longo de todo o período de validação/teste,
-    focando apenas na previsão de curto prazo (1 dia à frente).
-
-    Args:
-        preds: Previsões, shape (batch, horizon, n_stations)
-        obs: Observações, shape (batch, horizon, n_stations)
-        stations: Lista de IDs das estações
-        forecast_dates: Datas de início de cada previsão, shape (batch,)
-        df: DataFrame original com índice temporal
-        period_name: Nome do período ('Validação' ou 'Teste')
-        baseline_last: Baseline de persistência, shape (batch, n_stations)
-        figsize: Tamanho da figura
-    """
     B, T, S = preds.shape
-
-    # Converter forecast_dates para datetime
+    
     forecast_dates_dt = pd.to_datetime(forecast_dates)
-
-    # Determinar período completo
+    
+    # forecast_dates já é t+1, não precisa adicionar nada
     start_date = forecast_dates_dt.min()
     end_date = forecast_dates_dt.max() + timedelta(days=T-1)
-
+    
     fig, axes = plt.subplots(S, 1, figsize=(figsize[0], figsize[1] * S), sharex=True)
     axes = np.atleast_1d(axes)
-
+    
     for st_i, st_id in enumerate(stations):
         ax = axes[st_i]
-
-        # ==========================================
-        # SÉRIE OBSERVADA COMPLETA
-        # ==========================================
+        
+        # Série observada completa
         period_mask = (df.index >= start_date) & (df.index <= end_date)
         period_dates = df.index[period_mask]
         period_obs = df[f"Q_{st_id}"].loc[period_mask].values
-
+        
         ax.plot(period_dates, period_obs,
                label='Observado', color='black', linewidth=1.5, alpha=0.8)
-
-        # ==========================================
-        # PREVISÕES D+1 (PRIMEIRO DIA DO HORIZONTE)
-        # ==========================================
+        
+        # Previsões D+1
         d1_forecast_dates = []
         d1_forecast_values = []
-
+        
         for idx in range(B):
-            # Data da previsão D+1 (primeiro dia após forecast_start)
-            d1_date = forecast_dates_dt[idx] + timedelta(days=1)
-            d1_value = preds[idx, 0, st_i]  # Primeiro dia do horizonte (índice 0)
-
+            # forecast_dates[idx] JÁ É a data t+1 (não adicionar dias!)
+            d1_date = forecast_dates_dt[idx]  # ✅ CORRETO!
+            d1_value = preds[idx, 0, st_i]
+            
             d1_forecast_dates.append(d1_date)
             d1_forecast_values.append(d1_value)
-
+        
         ax.scatter(d1_forecast_dates, d1_forecast_values,
                   label='Previsão D+1', color='royalblue', s=20, alpha=0.7, zorder=5)
-
-        # ==========================================
-        # BASELINE DE PERSISTÊNCIA (OPCIONAL)
-        # ==========================================
+        
+        # Baseline de persistência
         if baseline_last is not None:
             baseline_dates = []
             baseline_values = []
-
+            
             for idx in range(B):
-                d1_date = forecast_dates_dt[idx] + timedelta(days=1)
+                # Plotar no mesmo dia (t+1)
+                d1_date = forecast_dates_dt[idx]  # ✅ CORRETO!
                 baseline_dates.append(d1_date)
                 baseline_values.append(baseline_last[idx, st_i])
-
+            
             ax.scatter(baseline_dates, baseline_values,
                       label='Persistência D+1', color='darkorange',
                       s=20, alpha=0.5, marker='x', zorder=4)
-
-        # ==========================================
-        # FORMATAÇÃO
-        # ==========================================
+        
+        # Formatação
         ax.set_title(
             f'Estação {st_id} — Série Completa ({period_name}) com Previsões D+1',
             fontsize=12, fontweight='bold'
@@ -304,18 +280,16 @@ def plot_full_series_with_d1_forecast(
         ax.set_ylabel('Vazão (m³/s)', fontsize=11)
         ax.grid(True, alpha=0.3)
         ax.legend(loc='best', fontsize=10)
-
-        # Formatar eixo X
+        
         ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
         ax.xaxis.set_major_locator(mdates.MonthLocator())
-
+        
         if st_i == S - 1:
             ax.set_xlabel('Data', fontsize=11)
             plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
-
+    
     plt.tight_layout()
     plt.show()
-
 
 def plot_predictions_extremes(
     preds: np.ndarray,
@@ -483,5 +457,5 @@ def plot_predictions_extremes(
             plt.show()
 
     print(f"{'='*60}")
-    print(f"✅ VISUALIZAÇÃO DE EXTREMOS CONCLUÍDA")
+    print("✅ VISUALIZAÇÃO DE EXTREMOS CONCLUÍDA")
     print(f"{'='*60}\n")
