@@ -28,6 +28,7 @@ class HydroDataset(Dataset):
         api_k_list: List[float], # Mantido para compatibilidade, mas não limita mais a busca
         static_keys: List[str],
         window_stride: int = 1,
+        reserve_last_days: int = 0,  # NOVO PARÂMETRO
     ):
         self.df = df
         self.stations = stations
@@ -39,6 +40,7 @@ class HydroDataset(Dataset):
         self.api_k_list = api_k_list
         self.static_keys = static_keys
         self.window_stride = window_stride
+        self.reserve_last_days = reserve_last_days
 
         # Escaladores dinâmicos
         self.flow_scalers = {}
@@ -100,7 +102,7 @@ class HydroDataset(Dataset):
             register_scaler(et_fc)
 
             # 3. Médias Móveis e Acumulados (Dinâmico)
-            # Busca qualquer coluna que comece com o padrão, independente da janela (3, 4, 10...)
+            # Busca qualquer coluna que comece com o padrão, independente da janela (3, 4, 10)
             for col in self._get_cols_by_prefix("precipitation_chirps_ma", st):
                 register_scaler(col)
 
@@ -132,7 +134,7 @@ class HydroDataset(Dataset):
 
             # 6. Log-Anomaly
             register_scaler(f"log_anomaly_{st}")
-            # Busca dinamicamente médias móveis da anomalia (ex: log_anomaly_ma3, ma7...)
+            # Busca dinamicamente médias móveis da anomalia (ex: log_anomaly_ma3, ma7)
             for col in self._get_cols_by_prefix("log_anomaly_ma", st):
                 register_scaler(col)
 
@@ -145,29 +147,31 @@ class HydroDataset(Dataset):
     def _build_valid_indices(self) -> List[int]:
         """
         Constrói lista de índices válidos para centers.
-        Regra: A janela inteira (Encoder + Decoder) não pode ter NaNs nas colunas de vazão.
+        Agora considera reserva de dias ao final.
         """
         enc_min_offset = int(self.encoder_offsets[0])
         dec_max_offset = int(self.decoder_offsets[-1])
-
+        
         window_size = dec_max_offset - enc_min_offset + 1
         flow_cols = [f"Q_{st}" for st in self.stations]
-
+        
         valid_rows = self.df[flow_cols].notna().all(axis=1).astype(int)
         rolling_valid = valid_rows.rolling(window=window_size).min()
         rolling_valid_np = rolling_valid.to_numpy()
-
+        
         start = -enc_min_offset
-        end = len(self.df) - dec_max_offset
-
+        
+        # MUDANÇA CRÍTICA: Subtrair dias reservados
+        end = len(self.df) - dec_max_offset - self.reserve_last_days
+        
         valid_centers = []
-
+        
         for c in range(start, end, self.window_stride):
             check_idx = c + dec_max_offset
             if 0 <= check_idx < len(rolling_valid_np):
                 if rolling_valid_np[check_idx] == 1.0:
                     valid_centers.append(c)
-
+        
         return valid_centers
 
     def __len__(self):
@@ -377,26 +381,105 @@ class HydroDataset(Dataset):
 def create_temporal_split_with_gap(
     dataset: HydroDataset,
     train_ratio: float = 0.95,
-    gap: Optional[int] = None
+    gap: Optional[int] = None,
+    exclude_reserved: bool = True  # NOVO
 ) -> Tuple[Subset, Subset]:
     """
-    Cria split temporal com gap para evitar sobreposição.
+    Cria split temporal com gap.
+    
+    Args:
+        exclude_reserved: Se True, não inclui dias reservados no split
     """
-    n = len(dataset)
+    n = len(dataset)  # Já considera reserve_last_days
+    
+    # O dataset já removeu os índices reservados, então n já é "correto"
     split_idx = int(n * train_ratio)
     split_idx = min(max(split_idx, 1), n - 1)
-
+    
     enc_min = int(dataset.encoder_offsets[0])
     dec_max = int(dataset.decoder_offsets[-1])
     min_gap_centers = dec_max - enc_min + 1
-
+    
     eff_gap = min_gap_centers if gap is None else max(gap, min_gap_centers)
     val_start = min(split_idx + eff_gap, n)
-
+    
     train_indices = list(range(0, split_idx))
     val_indices = list(range(val_start, n))
-
+    
     if len(val_indices) == 0:
         val_indices = list(range(split_idx, n))
-
+    
     return Subset(dataset, train_indices), Subset(dataset, val_indices)
+
+def create_dataset_for_training(
+    df: pd.DataFrame,
+    stations: List[int],
+    static_attrs: Dict[int, Dict[str, float]],
+    train_indices: np.ndarray,
+    forecast_cols: Dict[int, Tuple[str, str]],
+    flow_window_config: Dict,
+    climate_window_config: Dict,
+    temporal_features: List[str],
+    api_k_list: List[float],
+    static_keys: List[str],
+    horizon: int = 18,
+    use_last_days_as_forecast: bool = True,
+    window_stride: int = 1
+) -> HydroDataset:
+    """
+    Cria dataset apropriado para treino ou produção.
+    
+    Args:
+        df: DataFrame com features processadas
+        stations: Lista de IDs das estações
+        static_attrs: Dicionário de atributos estáticos
+        train_indices: Índices do conjunto de treino para calcular scalers
+        forecast_cols: Mapeamento de colunas de forecast por estação
+        flow_window_config: Configuração de janelas de vazão
+        climate_window_config: Configuração de janelas climáticas
+        temporal_features: Lista de features temporais
+        api_k_list: Lista de valores k para API
+        static_keys: Chaves dos atributos estáticos
+        horizon: Horizonte de previsão em dias
+        use_last_days_as_forecast: Se True, reserva últimos 'horizon' dias
+                                    para simular forecast durante treino
+        window_stride: Passo entre janelas deslizantes
+    
+    Returns:
+        HydroDataset configurado
+        
+    Examples:
+        # Para treino (reservar últimos 18 dias como "forecast")
+         dataset_train = create_dataset_for_training(
+             df=combined_df,
+             stations=[10100000, 13150000, 14100000],
+             #  outros parâmetros
+             horizon=18,
+             use_last_days_as_forecast=True
+         )
+        
+        # Para produção (usar todos os dados)
+         dataset_prod = create_dataset_for_training(
+             df=combined_df,
+             stations=[10100000, 13150000, 14100000],
+             #  outros parâmetros
+             horizon=18,
+             use_last_days_as_forecast=False
+         )
+    """
+    reserve_days = horizon if use_last_days_as_forecast else 0
+    
+    return HydroDataset(
+        df=df,
+        stations=stations,
+        static_attrs=static_attrs,
+        train_indices=train_indices,
+        forecast_cols=forecast_cols,
+        flow_window_config=flow_window_config,
+        climate_window_config=climate_window_config,
+        temporal_features=temporal_features,
+        api_k_list=api_k_list,
+        static_keys=static_keys,
+        window_stride=window_stride,
+        reserve_last_days=reserve_days
+    )

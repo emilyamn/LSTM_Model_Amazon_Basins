@@ -43,7 +43,8 @@ class ForecastGenerator:
         station_id: int,
         add_noise: bool = False,
         noise_std_precip: float = 0.1,
-        noise_std_et: float = 0.05
+        noise_std_et: float = 0.05,
+        extend_days: int = 0  # NOVO: padrão 0 (não estender)
     ) -> Dict[str, pd.DataFrame]:
         """
         Cria arquivos de forecast para uma estação específica.
@@ -85,60 +86,76 @@ class ForecastGenerator:
         # ==========================================
         # PRECIPITAÇÃO
         # ==========================================
-        # Copiar dados observados
         df_precip = df[['date', 'precipitation_chirps']].copy()
         df_precip.columns = ['date', 'precipitation_forecast']
         df_precip['station_id'] = station_id
-
-        # Estender com valores (última semana média ou persistência)
-        last_week_precip = df['precipitation_chirps'].tail(7).mean()
-
-        extended_precip = []
-        for date in extended_dates:
-            value = last_week_precip
-
-            # Adicionar ruído se solicitado
-            if add_noise:
-                noise = np.random.normal(0, noise_std_precip * value)
-                value = max(0, value + noise)  # Não permitir valores negativos
-
-            extended_precip.append({
-                'date': date,
-                'station_id': station_id,
-                'precipitation_forecast': value
-            })
-
-        df_extended_precip = pd.DataFrame(extended_precip)
-        df_precip = pd.concat([df_precip, df_extended_precip], ignore_index=True)
-
+        
+        # OPCIONAL: Adicionar ruído aos dados observados
+        if add_noise:
+            noise = np.random.normal(0, noise_std_precip * df_precip['precipitation_forecast'])
+            df_precip['precipitation_forecast'] = np.maximum(0, df_precip['precipitation_forecast'] + noise)
+        
+        # EXTENSÃO (apenas se extend_days > 0)
+        if extend_days > 0:
+            extended_dates = pd.date_range(
+                start=last_date + timedelta(days=1),
+                periods=extend_days,
+                freq='D'
+            )
+            
+            last_week_precip = df['precipitation_chirps'].tail(7).mean()
+            
+            extended_precip = []
+            for date in extended_dates:
+                value = last_week_precip
+                if add_noise:
+                    noise = np.random.normal(0, noise_std_precip * value)
+                    value = max(0, value + noise)
+                
+                extended_precip.append({
+                    'date': date,
+                    'station_id': station_id,
+                    'precipitation_forecast': value
+                })
+            
+            df_extended_precip = pd.DataFrame(extended_precip)
+            df_precip = pd.concat([df_precip, df_extended_precip], ignore_index=True)
+        
         # ==========================================
-        # EVAPOTRANSPIRAÇÃO
+        # EVAPOTRANSPIRAÇÃO (mesma lógica)
         # ==========================================
-        # Copiar dados observados
         df_et = df[['date', 'potential_evapotransp_gleam']].copy()
         df_et.columns = ['date', 'et_forecast']
         df_et['station_id'] = station_id
-
-        # Estender com valores (última semana média ou persistência)
-        last_week_et = df['potential_evapotransp_gleam'].tail(7).mean()
-
-        extended_et = []
-        for date in extended_dates:
-            value = last_week_et
-
-            # Adicionar ruído se solicitado
-            if add_noise:
-                noise = np.random.normal(0, noise_std_et * value)
-                value = max(0, value + noise)  # Não permitir valores negativos
-
-            extended_et.append({
-                'date': date,
-                'station_id': station_id,
-                'et_forecast': value
-            })
-
-        df_extended_et = pd.DataFrame(extended_et)
-        df_et = pd.concat([df_et, df_extended_et], ignore_index=True)
+        
+        if add_noise:
+            noise = np.random.normal(0, noise_std_et * df_et['et_forecast'])
+            df_et['et_forecast'] = np.maximum(0, df_et['et_forecast'] + noise)
+        
+        if extend_days > 0:
+            extended_dates = pd.date_range(
+                start=last_date + timedelta(days=1),
+                periods=extend_days,
+                freq='D'
+            )
+            
+            last_week_et = df['potential_evapotransp_gleam'].tail(7).mean()
+            
+            extended_et = []
+            for date in extended_dates:
+                value = last_week_et
+                if add_noise:
+                    noise = np.random.normal(0, noise_std_et * value)
+                    value = max(0, value + noise)
+                
+                extended_et.append({
+                    'date': date,
+                    'station_id': station_id,
+                    'et_forecast': value
+                })
+            
+            df_extended_et = pd.DataFrame(extended_et)
+            df_et = pd.concat([df_et, df_extended_et], ignore_index=True)
 
         # ==========================================
         # SALVAR ARQUIVOS

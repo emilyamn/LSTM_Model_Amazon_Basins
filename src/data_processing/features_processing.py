@@ -411,29 +411,29 @@ def merge_observed_and_forecast(
     observed_dict: Dict[int, pd.DataFrame],
     forecast_dict: Dict[int, pd.DataFrame]
 ) -> Dict[int, pd.DataFrame]:
-    """
-    Faz merge dos dados observados com forecast.
-    
-    Returns:
-        Dicionário {station_id: DataFrame combinado}
-    """
+    """Faz merge dos dados observados com forecast."""
     merged_dict = {}
-
+    
     for station_id in observed_dict.keys():
         if station_id not in forecast_dict:
-            print(f"⚠️  Sem dados de forecast para estação {station_id}, pulando...")
+            print(f"⚠️  Sem dados de forecast para estação {station_id}, usando observados")
+            df_merged = observed_dict[station_id].copy()
+            # Criar colunas de forecast iguais aos observados
+            df_merged['precipitation_forecast'] = df_merged['precipitation_chirps']
+            df_merged['et_forecast'] = df_merged['potential_evapotransp_gleam']
+            merged_dict[station_id] = df_merged
             continue
-
+        
         df_obs = observed_dict[station_id].copy()
         df_fc = forecast_dict[station_id].copy()
-
-        # GARANTIR QUE AMBAS AS COLUNAS 'date' SEJAM datetime
+        
+        # GARANTIR datetime
         df_obs['date'] = pd.to_datetime(df_obs['date'])
         df_fc['date'] = pd.to_datetime(df_fc['date'])
-
-        # Merge por data
+        
+        # Merge por data (LEFT: manter todos os observados)
         df_merged = df_obs.merge(df_fc, on='date', how='left')
-
+        
         # Para dias sem forecast, usar dados observados
         df_merged['precipitation_forecast'] = df_merged['precipitation_forecast'].fillna(
             df_merged['precipitation_chirps']
@@ -441,9 +441,9 @@ def merge_observed_and_forecast(
         df_merged['et_forecast'] = df_merged['et_forecast'].fillna(
             df_merged['potential_evapotransp_gleam']
         )
-
+        
         merged_dict[station_id] = df_merged
-
+    
     return merged_dict
 
 

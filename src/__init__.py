@@ -4,7 +4,7 @@ Módulo principal para previsão hidrológica.
 
 # Importações principais - Data
 from .data.data_structures import Scaler, Sample
-from .data.dataset import HydroDataset, create_temporal_split_with_gap
+from .data.dataset import HydroDataset, create_temporal_split_with_gap, create_dataset_for_training
 
 # Importações principais - Model
 from .model.architecture import Seq2SeqHydro
@@ -61,7 +61,7 @@ __all__ = [
     # Data structures
     "Scaler", "Sample",
     # Dataset
-    "HydroDataset", "create_temporal_split_with_gap",
+    "HydroDataset", "create_temporal_split_with_gap", "create_dataset_for_training",
     # Model
     "Seq2SeqHydro", "StaticEmbedding",
     # Training
