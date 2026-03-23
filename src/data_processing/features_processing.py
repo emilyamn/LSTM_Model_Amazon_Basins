@@ -2,7 +2,7 @@
 Módulo para feature engineering de dados hidrológicos.
 """
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Literal
 import pathlib
 import sys
 import pandas as pd
@@ -17,17 +17,16 @@ src_path = project_root / "src"
 if str(src_path) not in sys.path:
     sys.path.insert(0, str(src_path))
 
-try:
-    from utils.config_loader import load_feature_config
-    CONFIG_AVAILABLE = True
-except (ImportError, ModuleNotFoundError) as e:
-    CONFIG_AVAILABLE = False
-    print(f"⚠️  Módulo config_loader não encontrado: {e}. Usando valores padrão.")
-
+# Tipo para forçantes
+ForcingType = Literal["P", "P_ET"]
 
 class HydroFeatureEngineer:
     """
     Classe para criação de features hidrológicas avançadas.
+
+    Supports two forcing configurations:
+    - "P": Only precipitation (default) - for operational use without ET
+    - "P_ET": Precipitation + Evapotranspiration - for training with ET data
     """
 
     def __init__(self,
@@ -37,7 +36,8 @@ class HydroFeatureEngineer:
                  forecast_ma_windows: List[int] = None,
                  forecast_cumulative_windows: List[int] = None,
                  evapotranspiration_ma_windows: List[int] = None,
-                 anomaly_ma_windows: List[int] = None):
+                 anomaly_ma_windows: List[int] = None,
+                 forcings: ForcingType = "P"):
         """
         Inicializa o engenheiro de features com configurações granulares.
 
@@ -49,6 +49,9 @@ class HydroFeatureEngineer:
             forecast_cumulative_windows: Janelas para acumulados de forecast de precipitação
             evapotranspiration_ma_windows: Janelas para médias móveis de evapotranspiração
             anomaly_ma_windows: Janelas para médias móveis de anomalias
+            forcings: Forçantes do modelo
+                - "P": apenas precipitação (padrão, para operação sem ET)
+                - "P_ET": precipitação + evapotranspiração (para treino com ET)
         """
         # Valores padrão
         self.api_k_list = api_k_list or [0.70, 0.80, 0.85, 0.90, 0.92, 0.95]
@@ -58,6 +61,9 @@ class HydroFeatureEngineer:
         self.forecast_cumulative_windows = forecast_cumulative_windows or [3, 5, 7, 10]
         self.evapotranspiration_ma_windows = evapotranspiration_ma_windows or [7, 14, 30]
         self.anomaly_ma_windows = anomaly_ma_windows or [3, 7]
+
+        # Forçantes - define quais variáveis usar
+        self.forcings = forcings if forcings else "P"
 
     @staticmethod
     def compute_api(series: pd.Series, k: float) -> pd.Series:
@@ -113,7 +119,7 @@ class HydroFeatureEngineer:
         Adiciona features de evapotranspiração (observada ou forecast).
         """
         prefix = "et_forecast" if is_forecast else "et_obs"
-        
+
         for w in self.evapotranspiration_ma_windows:
             min_p = max(1, w // 2)
             df[f'{prefix}_ma{w}_{station}'] = (
@@ -125,15 +131,21 @@ class HydroFeatureEngineer:
     def add_api_features(self,
                         df: pd.DataFrame,
                         station: int,
-                        precip_obs_col: str,
-                        precip_forecast_col: str) -> pd.DataFrame:
+                        precip_obs_col: Optional[str],
+                        precip_forecast_col: Optional[str]) -> pd.DataFrame:
         """
         Adiciona features de API para dados observados e forecast.
         """
         for k in self.api_k_list:
             tag = f"k{int(round(k*100)):02d}"
-            df[f'api_obs_{tag}_{station}'] = self.compute_api(df[precip_obs_col], k)
-            df[f'api_forecast_{tag}_{station}'] = self.compute_api(df[precip_forecast_col], k)
+
+            # API observada - apenas se a coluna existir
+            if precip_obs_col and precip_obs_col in df.columns:
+                df[f'api_obs_{tag}_{station}'] = self.compute_api(df[precip_obs_col], k)
+
+            # API forecast - apenas se a coluna existir
+            if precip_forecast_col and precip_forecast_col in df.columns:
+                df[f'api_forecast_{tag}_{station}'] = self.compute_api(df[precip_forecast_col], k)
 
         return df
 
@@ -161,8 +173,8 @@ class HydroFeatureEngineer:
                              df: pd.DataFrame,
                              station: int,
                              flow_col: str,
-                             precip_obs_col: str,
-                             precip_forecast_col: str,
+                             precip_obs_col: Optional[str],
+                             precip_forecast_col: Optional[str],
                              train_date_cutoff: Optional[str] = None) -> pd.DataFrame:
         """
         Adiciona features avançadas.
@@ -177,10 +189,15 @@ class HydroFeatureEngineer:
         # Mediana sazonal
         seasonal_median = ref_df.groupby(ref_df.index.dayofyear)[flow_col].median()
 
-        # Derivadas
+        # Derivada do fluxo - sempre
         df[f'dQ_dt_{station}'] = df[flow_col].diff().fillna(0.0)
-        df[f'dP_obs_dt_{station}'] = df[precip_obs_col].diff().fillna(0.0)
-        df[f'dP_forecast_dt_{station}'] = df[precip_forecast_col].diff().fillna(0.0)
+
+        # Derivadas de precipitação - apenas se existirem
+        if precip_obs_col and precip_obs_col in df.columns:
+            df[f'dP_obs_dt_{station}'] = df[precip_obs_col].diff().fillna(0.0)
+
+        if precip_forecast_col and precip_forecast_col in df.columns:
+            df[f'dP_forecast_dt_{station}'] = df[precip_forecast_col].diff().fillna(0.0)
 
         # Estado do regime
         dQ_smooth = df[f'dQ_dt_{station}'].rolling(5, center=True, min_periods=1).mean()
@@ -232,29 +249,54 @@ class HydroFeatureEngineer:
 
         return df
 
-    def process_station(self,
-                       df: pd.DataFrame,
-                       station_id: int,
-                       train_date_cutoff: Optional[str] = None) -> pd.DataFrame:
+    def fit_transform(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Processa uma única estação, adicionando todas as features.
-        
-        IMPORTANTE: O DataFrame de entrada deve conter as colunas de forecast
-        já merged de data/forecast/
+        Método de conveniência que chama process_station para um único DataFrame.
         """
-        # Verificar colunas necessárias
-        required_cols = [
-            'date', 'streamflow_m3s',
-            'precipitation_chirps', 'potential_evapotransp_gleam',
-            'precipitation_forecast', 'et_forecast'  # ← Devem vir do merge!
-        ]
+        return df
 
-        missing_cols = [col for col in required_cols if col not in df.columns]
-        if missing_cols:
+    def process_station(
+        self,
+        df: pd.DataFrame,
+        station_id: int,
+        train_date_cutoff: Optional[str] = None,
+        column_names: Optional[Dict[str, str]] = None,
+        forcings: Optional[ForcingType] = None
+    ) -> pd.DataFrame:
+        """
+        ⚙️ Função auxiliar - processa UMA estação.
+        Chamada internamente por process_stations.
+
+        Args:
+            df: DataFrame com os dados
+            station_id: ID da estação
+            train_date_cutoff: Data de corte para treino
+            column_names: Mapeamento de colunas
+            forcings: Forçantes ("P" ou "P_ET"). Se None, usa o padrão da classe
+        """
+        # Usar forcings da classe se não especificado
+        use_forcings = forcings if forcings is not None else self.forcings
+
+        # Definir nomes padrão
+        default_column_names = {
+            'flow': 'streamflow_m3s',
+            'precip_obs': 'precipitation_chirps',
+            'et_obs': 'potential_evapotransp_gleam',
+            'precip_forecast': 'precipitation_forecast',
+            'et_forecast': 'et_forecast'
+        }
+
+        col_map = column_names if column_names is not None else default_column_names
+
+        # Verificar APENAS colunas obrigatórias (flow)
+        if 'flow' not in col_map:
+            raise ValueError(f"Estação {station_id}: Coluna 'flow' é obrigatória no column_names")
+
+        flow_col = col_map['flow']
+        if flow_col not in df.columns:
             raise ValueError(
-                f"❌ Colunas faltantes para estação {station_id}: {missing_cols}\n"
-                f"   Certifique-se de fazer o merge com dados de data/forecast/ "
-                f"antes de processar features."
+                f"❌ Coluna de fluxo faltante para estação {station_id}: {flow_col}"
+                f"   Disponíveis: {list(df.columns)}"
             )
 
         # Preparar DataFrame
@@ -262,89 +304,125 @@ class HydroFeatureEngineer:
         df['date'] = pd.to_datetime(df['date'])
         df = df.set_index('date').sort_index()
 
-        # Renomear colunas com padronização _obs e _forecast
-        column_map = {
-            'streamflow_m3s': f'Q_{station_id}',
-            'precipitation_chirps': f'precipitation_obs_{station_id}',
-            'potential_evapotransp_gleam': f'et_obs_{station_id}',
-            'precipitation_forecast': f'precipitation_forecast_{station_id}',
-            'et_forecast': f'et_forecast_{station_id}'
-        }
+        # Renomear APENAS as colunas que existem E que são permitidas pelo forcings
+        rename_map = {}
+        rename_map[col_map['flow']] = f'Q_{station_id}'
 
-        df = df.rename(columns=column_map)
+        # Precip observada (sempre disponível se existir)
+        if 'precip_obs' in col_map and col_map['precip_obs'] in df.columns:
+            rename_map[col_map['precip_obs']] = f'precipitation_obs_{station_id}'
 
-        # Definir nomes das colunas
-        flow_col = f'Q_{station_id}'
-        precip_obs_col = f'precipitation_obs_{station_id}'
-        precip_fc_col = f'precipitation_forecast_{station_id}'
-        et_obs_col = f'et_obs_{station_id}'
-        et_fc_col = f'et_forecast_{station_id}'
+        # Precip forecast (sempre disponível se existir)
+        if 'precip_forecast' in col_map and col_map['precip_forecast'] in df.columns:
+            rename_map[col_map['precip_forecast']] = f'precipitation_forecast_{station_id}'
 
-        # ==========================================
-        # FEATURES DE PRECIPITAÇÃO
-        # ==========================================
-        # Observada (para encoder)
-        df = self.add_precipitation_features(df, station_id, precip_obs_col, is_forecast=False)
-        
-        # Forecast (para decoder)
-        df = self.add_precipitation_features(df, station_id, precip_fc_col, is_forecast=True)
+        # ET: apenas se forcings="P_ET" e a coluna existir
+        if use_forcings == "P_ET":
+            if 'et_obs' in col_map and col_map['et_obs'] in df.columns:
+                rename_map[col_map['et_obs']] = f'et_obs_{station_id}'
+            if 'et_forecast' in col_map and col_map['et_forecast'] in df.columns:
+                rename_map[col_map['et_forecast']] = f'et_forecast_{station_id}'
 
-        # ==========================================
-        # FEATURES DE EVAPOTRANSPIRAÇÃO
-        # ==========================================
-        # Observada (para encoder)
-        df = self.add_evapotranspiration_features(df, station_id, et_obs_col, is_forecast=False)
-        
-        # Forecast (para decoder)
-        df = self.add_evapotranspiration_features(df, station_id, et_fc_col, is_forecast=True)
+        df = df.rename(columns=rename_map)
 
-        # ==========================================
-        # API
-        # ==========================================
-        df = self.add_api_features(df, station_id, precip_obs_col, precip_fc_col)
+        # Definir nomes internos (apenas se existirem)
+        flow_col_renamed = f'Q_{station_id}'
+        precip_obs_col = f'precipitation_obs_{station_id}' if f'precipitation_obs_{station_id}' in df.columns else None
+        precip_fc_col = f'precipitation_forecast_{station_id}' if f'precipitation_forecast_{station_id}' in df.columns else None
 
-        # ==========================================
-        # FEATURES AVANÇADAS
-        # ==========================================
-        df = self.add_advanced_features(
-            df, station_id, flow_col, precip_obs_col, precip_fc_col, train_date_cutoff
-        )
+        # ET: apenas se forcings="P_ET"
+        et_obs_col = None
+        et_fc_col = None
+        if use_forcings == "P_ET":
+            et_obs_col = f'et_obs_{station_id}' if f'et_obs_{station_id}' in df.columns else None
+            et_fc_col = f'et_forecast_{station_id}' if f'et_forecast_{station_id}' in df.columns else None
+
+        # Features - apenas para colunas que existem
+        if precip_obs_col:
+            df = self.add_precipitation_features(df, station_id, precip_obs_col, is_forecast=False)
+        if precip_fc_col:
+            df = self.add_precipitation_features(df, station_id, precip_fc_col, is_forecast=True)
+        if et_obs_col:
+            df = self.add_evapotranspiration_features(df, station_id, et_obs_col, is_forecast=False)
+        if et_fc_col:
+            df = self.add_evapotranspiration_features(df, station_id, et_fc_col, is_forecast=True)
+
+        # API - apenas se tiver precip
+        if precip_obs_col or precip_fc_col:
+            df = self.add_api_features(df, station_id, precip_obs_col, precip_fc_col)
+
+        # Advanced features - requer flow
+        df = self.add_advanced_features(df, station_id, flow_col_renamed, precip_obs_col, precip_fc_col, train_date_cutoff)
 
         return df
 
-    def process_multiple_stations(self,
-                                 data_dict: Dict[int, pd.DataFrame],
-                                 train_date_cutoff: Optional[str] = None) -> pd.DataFrame:
+    def process_multiple_stations(
+        self,
+        data_dict: Dict[int, pd.DataFrame],
+        train_date_cutoff: Optional[str] = None,
+        column_names: Optional[Dict[str, str]] = None,
+        forcings: Optional[ForcingType] = None
+    ) -> pd.DataFrame:
         """
-        Processa múltiplas estações e combina em um único DataFrame.
+        MÉTODO PRINCIPAL - Processa uma ou múltiplas estações.
+
+        Args:
+            data_dict: {station_id: DataFrame}s
+            train_date_cutoff: Data de corte (opcional)
+            column_names: Mapeamento de colunas (opcional)
+            forcings: Forçantes ("P" ou "P_ET"). Se None, usa o padrão da classe
+
+        Returns:
+            DataFrame combinado com features
         """
+        # Usar forcings da classe se não especificado
+        use_forcings = forcings if forcings is not None else self.forcings
+
+        if not data_dict:
+            raise ValueError("data_dict vazio")
+
         processed_dfs = []
+
+        print(f"{'='*60}")
+        print(f"PROCESSANDO {len(data_dict)} ESTAÇÃO(ÕES)")
+        print(f"   Forçantes: {use_forcings}")
+        print(f"{'='*60}")
 
         for station_id, df in data_dict.items():
             try:
-                df_processed = self.process_station(df, station_id, train_date_cutoff)
+                print(f"📊 Estação {station_id}...")
+
+                # Chama auxiliar COM column_names E forcings
+                df_processed = self.process_station(
+                    df=df,
+                    station_id=station_id,
+                    train_date_cutoff=train_date_cutoff,
+                    column_names=column_names,
+                    forcings=use_forcings
+                )
+
                 processed_dfs.append(df_processed)
-                print(f"✓ Estação {station_id} processada")
+                print(f"✅ OK - {len(df_processed.columns)} features")
+
             except Exception as e:
-                print(f"✗ Erro ao processar estação {station_id}: {e}")
+                print(f"❌ Erro: {e}")
                 continue
 
         if not processed_dfs:
-            raise ValueError("Nenhuma estação foi processada com sucesso")
+            raise ValueError("Nenhuma estação processada")
 
-        # Combinar DataFrames
+        # Combinar
         combined_df = processed_dfs[0]
         for df in processed_dfs[1:]:
             combined_df = combined_df.merge(df, left_index=True, right_index=True, how='outer')
 
-        # Preencher valores faltantes
         combined_df = combined_df.ffill().bfill()
-
-        # Adicionar features sazonais
         combined_df = self.add_seasonal_features(combined_df)
 
-        return combined_df
+        print(f"✅ CONCLUÍDO - {len(combined_df.columns)} colunas")
+        print(f"{'='*60}")
 
+        return combined_df
 
 def load_station_data(complete_series_dir: pathlib.Path,
                      station_ids: List[int]) -> Dict[int, pd.DataFrame]:
@@ -368,13 +446,18 @@ def load_station_data(complete_series_dir: pathlib.Path,
     return data_dict
 
 
-def load_forecast_data(forecast_dir: pathlib.Path,
-                      station_ids: List[int]) -> Dict[int, pd.DataFrame]:
+def load_forecast_data(
+    forecast_dir: pathlib.Path,
+    station_ids: List[int],
+    forcings: ForcingType = "P"  # ← ADICIONAR PARÂMETRO
+) -> Dict[int, pd.DataFrame]:
     """
     Carrega dados de forecast para múltiplas estações.
     
-    Returns:
-        Dicionário {station_id: DataFrame com colunas 'precipitation_forecast' e 'et_forecast'}
+    Args:
+        forecast_dir: Diretório com arquivos de forecast
+        station_ids: Lista de IDs das estações
+        forcings: "P" = só precipitação, "P_ET" = precipitação + ET
     """
     forecast_dict = {}
 
@@ -382,23 +465,38 @@ def load_forecast_data(forecast_dir: pathlib.Path,
         precip_file = forecast_dir / f"{station_id}_precipitation_forecast.csv"
         et_file = forecast_dir / f"{station_id}_evapotranspiration_forecast.csv"
 
-        if not precip_file.exists() or not et_file.exists():
-            print(f"✗ Arquivos de forecast não encontrados para estação {station_id}")
+        # ✅ VERIFICAR se precisa carregar ET
+        need_et = (forcings == "P_ET")
+        
+        # Verificar se arquivos existem
+        precip_exists = precip_file.exists()
+        et_exists = et_file.exists() if need_et else False
+        
+        if not precip_exists:
+            print(f"✗ Arquivo de precipitação não encontrado para estação {station_id}")
+            continue
+        
+        if need_et and not et_exists:
+            print(f"⚠️  Arquivo de ET não encontrado para estação {station_id} (forcings=P_ET)")
             continue
 
         try:
-            # Carregar precipitação COM CONVERSÃO DE DATA
+            # Carregar precipitação (SEMPRE)
             df_precip = pd.read_csv(precip_file, parse_dates=['date'])
-            df_precip['date'] = pd.to_datetime(df_precip['date'])  # ← GARANTIR datetime
+            df_precip['date'] = pd.to_datetime(df_precip['date'])
             df_precip = df_precip[['date', 'precipitation_forecast']]
 
-            # Carregar ET COM CONVERSÃO DE DATA
-            df_et = pd.read_csv(et_file, parse_dates=['date'])
-            df_et['date'] = pd.to_datetime(df_et['date'])  # ← GARANTIR datetime
-            df_et = df_et[['date', 'et_forecast']]
+            # ✅ Carregar ET APENAS se forcings="P_ET"
+            if need_et:
+                df_et = pd.read_csv(et_file, parse_dates=['date'])
+                df_et['date'] = pd.to_datetime(df_et['date'])
+                df_et = df_et[['date', 'et_forecast']]
+                
+                df_forecast = df_precip.merge(df_et, on='date', how='outer')
+            else:
+                # Apenas precipitação
+                df_forecast = df_precip
 
-            # Merge
-            df_forecast = df_precip.merge(df_et, on='date', how='outer')
             forecast_dict[station_id] = df_forecast
 
         except Exception as e:
@@ -406,94 +504,102 @@ def load_forecast_data(forecast_dir: pathlib.Path,
 
     return forecast_dict
 
-
 def merge_observed_and_forecast(
     observed_dict: Dict[int, pd.DataFrame],
-    forecast_dict: Dict[int, pd.DataFrame]
+    forecast_dict: Dict[int, pd.DataFrame],
+    forcings: ForcingType = "P"
 ) -> Dict[int, pd.DataFrame]:
-    """Faz merge dos dados observados com forecast."""
+    """
+    Faz merge dos dados observados com forecast.
+    """
     merged_dict = {}
-    
+    need_et = (forcings == "P_ET")
+
     for station_id in observed_dict.keys():
         if station_id not in forecast_dict:
             print(f"⚠️  Sem dados de forecast para estação {station_id}, usando observados")
             df_merged = observed_dict[station_id].copy()
-            # Criar colunas de forecast iguais aos observados
             df_merged['precipitation_forecast'] = df_merged['precipitation_chirps']
-            df_merged['et_forecast'] = df_merged['potential_evapotransp_gleam']
+            
+            if need_et and 'potential_evapotransp_gleam' in df_merged.columns:
+                df_merged['et_forecast'] = df_merged['potential_evapotransp_gleam']
+            else:
+                et_cols = [c for c in df_merged.columns if 'evapotransp' in c.lower() or 'et_' in c.lower()]
+                if et_cols:
+                    df_merged = df_merged.drop(columns=et_cols)
+            
             merged_dict[station_id] = df_merged
             continue
-        
+
         df_obs = observed_dict[station_id].copy()
         df_fc = forecast_dict[station_id].copy()
-        
-        # GARANTIR datetime
+
         df_obs['date'] = pd.to_datetime(df_obs['date'])
         df_fc['date'] = pd.to_datetime(df_fc['date'])
-        
-        # Merge por data (LEFT: manter todos os observados)
+
         df_merged = df_obs.merge(df_fc, on='date', how='left')
-        
-        # Para dias sem forecast, usar dados observados
+
         df_merged['precipitation_forecast'] = df_merged['precipitation_forecast'].fillna(
             df_merged['precipitation_chirps']
         )
-        df_merged['et_forecast'] = df_merged['et_forecast'].fillna(
-            df_merged['potential_evapotransp_gleam']
-        )
         
+        if need_et:
+            if 'et_forecast' in df_merged.columns and 'potential_evapotransp_gleam' in df_merged.columns:
+                df_merged['et_forecast'] = df_merged['et_forecast'].fillna(
+                    df_merged['potential_evapotransp_gleam']
+                )
+        else:
+            # REMOVER colunas de ET
+            et_cols_to_drop = [
+                col for col in df_merged.columns 
+                if any(keyword in col.lower() for keyword in ['evapotransp', 'et_forecast', 'et_obs', '_et_', 'gleam'])
+            ]
+            if et_cols_to_drop:
+                df_merged = df_merged.drop(columns=et_cols_to_drop)
+                print(f"   🗑️  Removidas {len(et_cols_to_drop)} colunas de ET (forcings=P)")
+
+        # ✅✅✅ REMOVER COLUNAS DESNECESSÁRIAS DO MERGE (station_id, missing_data, etc.)
+        cols_to_drop = [
+            col for col in df_merged.columns 
+            if col.endswith('_x') or col.endswith('_y') or 
+               col in ['station_id', 'missing_data', 'Unnamed: 0']
+        ]
+        if cols_to_drop:
+            df_merged = df_merged.drop(columns=cols_to_drop)
+            print(f"   🗑️  Removidas colunas desnecessárias: {cols_to_drop}")
+
         merged_dict[station_id] = df_merged
-    
+
     return merged_dict
 
-
-def process_features(input_dir: pathlib.Path,
-                    forecast_dir: pathlib.Path,
-                    output_dir: pathlib.Path,
-                    station_ids: List[int],
-                    api_k_list: Optional[List[float]] = None,
-                    precipitation_ma_windows: Optional[List[int]] = None,
-                    precipitation_cumulative_windows: Optional[List[int]] = None,
-                    forecast_ma_windows: Optional[List[int]] = None,
-                    forecast_cumulative_windows: Optional[List[int]] = None,
-                    evapotranspiration_ma_windows: Optional[List[int]] = None,
-                    anomaly_ma_windows: Optional[List[int]] = None,
-                    train_date_cutoff: Optional[str] = None,
-                    output_filename: str = "features_combined.csv",
-                    use_config_file: bool = True) -> pd.DataFrame:
+def process_features(
+    input_dir: pathlib.Path,
+    forecast_dir: pathlib.Path,
+    output_dir: pathlib.Path,
+    station_ids: List[int],
+    api_k_list: Optional[List[float]] = None,
+    precipitation_ma_windows: Optional[List[int]] = None,
+    precipitation_cumulative_windows: Optional[List[int]] = None,
+    forecast_ma_windows: Optional[List[int]] = None,
+    forecast_cumulative_windows: Optional[List[int]] = None,
+    evapotranspiration_ma_windows: Optional[List[int]] = None,
+    anomaly_ma_windows: Optional[List[int]] = None,
+    train_date_cutoff: Optional[str] = None,
+    output_filename: str = "features_combined.csv",
+    forcings: ForcingType = "P"
+) -> pd.DataFrame:
     """
     Função principal para processamento de features.
-    Agora inclui merge com dados de forecast.
+
+    Args:
+        forcings: "P" = apenas precipitação (padrão, para operação)
+                   "P_ET" = precipitação + ET (para treino com ET)
     """
     print("="*60)
     print("PROCESSAMENTO DE FEATURES")
+    print(f"   Forçantes: {forcings}")
     print("="*60)
 
-    # Carregar configurações do YAML se disponível
-    if use_config_file and CONFIG_AVAILABLE:
-        try:
-            config = load_feature_config()
-            print("✅ Configurações carregadas do arquivo YAML")
-
-            if api_k_list is None:
-                api_k_list = config.get('api_k_list')
-            if precipitation_ma_windows is None:
-                precipitation_ma_windows = config.get('precipitation_ma')
-            if precipitation_cumulative_windows is None:
-                precipitation_cumulative_windows = config.get('precipitation_cum')
-            if forecast_ma_windows is None:
-                forecast_ma_windows = config.get('forecast_ma', config.get('precipitation_ma'))
-            if forecast_cumulative_windows is None:
-                forecast_cumulative_windows = config.get('forecast_cum', config.get('precipitation_cum'))
-            if evapotranspiration_ma_windows is None:
-                evapotranspiration_ma_windows = config.get('evapotranspiration_ma')
-            if anomaly_ma_windows is None:
-                anomaly_ma_windows = config.get('anomaly_ma')
-
-        except Exception as e:
-            print(f"⚠️  Erro ao carregar configurações: {e}")
-
-    # Verificar diretórios
     if not input_dir.exists():
         raise FileNotFoundError(f"Diretório de entrada não encontrado: {input_dir}")
     if not forecast_dir.exists():
@@ -501,26 +607,24 @@ def process_features(input_dir: pathlib.Path,
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Carregar dados observados
-    print(f"\n📊 Carregando dados observados de {len(station_ids)} estações...")
+    print(f"📊 Carregando dados observados de {len(station_ids)} estações...")
     observed_dict = load_station_data(input_dir, station_ids)
     print(f"✓ {len(observed_dict)} estações carregadas")
 
-    # Carregar dados de forecast
-    print("\n🔮 Carregando dados de forecast...")
-    forecast_dict = load_forecast_data(forecast_dir, station_ids)
+    print("🔮 Carregando dados de forecast...")
+    # ✅ PASSAR forcings
+    forecast_dict = load_forecast_data(forecast_dir, station_ids, forcings=forcings)
     print(f"✓ {len(forecast_dict)} estações com forecast carregadas")
 
-    # Merge observado + forecast
-    print("\n🔗 Fazendo merge observado + forecast...")
-    merged_dict = merge_observed_and_forecast(observed_dict, forecast_dict)
+    print("🔗 Fazendo merge observado + forecast...")
+    # ✅ PASSAR forcings
+    merged_dict = merge_observed_and_forecast(observed_dict, forecast_dict, forcings=forcings)
     print(f"✓ {len(merged_dict)} estações combinadas")
 
     if not merged_dict:
         raise ValueError("Nenhum dado foi combinado. Verifique os arquivos de forecast.")
 
-    # Processar features
-    print("\n⚙️  Criando features...")
+    print("⚙️  Criando features...")
     engineer = HydroFeatureEngineer(
         api_k_list=api_k_list,
         precipitation_ma_windows=precipitation_ma_windows,
@@ -528,21 +632,23 @@ def process_features(input_dir: pathlib.Path,
         forecast_ma_windows=forecast_ma_windows,
         forecast_cumulative_windows=forecast_cumulative_windows,
         evapotranspiration_ma_windows=evapotranspiration_ma_windows,
-        anomaly_ma_windows=anomaly_ma_windows
+        anomaly_ma_windows=anomaly_ma_windows,
+        forcings=forcings  # ← Já estava correto
     )
 
     combined_df = engineer.process_multiple_stations(
         merged_dict,
-        train_date_cutoff=train_date_cutoff
+        train_date_cutoff=train_date_cutoff,
+        forcings=forcings  # ← Já estava correto
     )
 
-    # Salvar resultados
     output_path = output_dir / output_filename
     combined_df.to_csv(output_path)
 
-    print("\n" + "="*60)
+    print("" + "="*60)
     print("✅ FEATURES CRIADAS COM SUCESSO")
     print("="*60)
+    print(f"  Forçantes: {forcings}")
     print(f"  Estações processadas: {len(merged_dict)}")
     print(f"  Período: {combined_df.index.min().date()} a {combined_df.index.max().date()}")
     print(f"  Total de dias: {len(combined_df)}")

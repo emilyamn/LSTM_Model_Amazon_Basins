@@ -1,10 +1,34 @@
 """
 Módulo principal para previsão hidrológica.
 """
+from .data_processing import (
+    # Complete Series
+    DataPreprocessor,
+
+    # Interpolação
+    batch_interpolate_and_overwrite,
+
+    # Forecast
+    ForecastGenerator,
+    generate_forecast_files,
+
+    # Feature Engineering - Treino
+    HydroFeatureEngineer,
+    ForcingType,
+    load_observed_data,
+    load_forecast_data,
+    merge_observed_and_forecast,
+    process_features,
+
+    # Feature Engineering - Inferência
+    InferenceConfig,
+    process_inference,
+    INTERNAL_COLUMN_NAMES,
+)
 
 # Importações principais - Data
 from .data.data_structures import Scaler, Sample
-from .data.dataset import HydroDataset, create_temporal_split_with_gap, create_dataset_for_training
+from .data.dataset import HydroDataset, create_temporal_split_with_gap, create_dataset_for_training_validation, create_dataset_for_inference
 
 # Importações principais - Model
 from .model.architecture import Seq2SeqHydro
@@ -58,31 +82,64 @@ from .linar import (
 )
 
 __all__ = [
-    # Data structures
-    "Scaler", "Sample",
-    # Dataset
-    "HydroDataset", "create_temporal_split_with_gap", "create_dataset_for_training",
-    # Model
-    "Seq2SeqHydro", "StaticEmbedding",
-    # Training
-    "train_model", "predict_autoregressive", "multi_step_loss",
-    # Utils - Config
-    "ConfigLoader", "load_feature_config", "load_split_config",
-    "load_config", "load_all_configs",
-    # Utils - Data
-    "get_device", "custom_collate_fn", "move_sample_to_device",
-    # Utils - Time
+    # ===== DATA PROCESSING =====
+    "DataPreprocessor",
+    "batch_interpolate_and_overwrite",
+    "ForecastGenerator",
+    "generate_forecast_files",
+    
+    # Feature Engineering
+    "HydroFeatureEngineer",
+    "ForcingType",  # ← ADICIONAR
+    "load_observed_data",
+    "load_forecast_data",
+    "merge_observed_and_forecast",
+    "process_features",
+    
+    # Inferência
+    "InferenceConfig",
+    "process_inference",
+    "INTERNAL_COLUMN_NAMES",
+    
+    # ===== DATA STRUCTURES & DATASET =====
+    "Scaler",
+    "Sample",
+    "HydroDataset",
+    "create_temporal_split_with_gap",
+    "create_dataset_for_training_validation",
+    "create_dataset_for_inference",
+    
+    # ===== MODEL =====
+    "Seq2SeqHydro",
+    "StaticEmbedding",
+    
+    # ===== TRAINING =====
+    "train_model",
+    "predict_autoregressive",
+    "multi_step_loss",
+    
+    # ===== UTILS =====
+    "ConfigLoader",
+    "load_feature_config",
+    "load_split_config",
+    "load_config",
+    "load_all_configs",
+    "get_device",
+    "custom_collate_fn",
+    "move_sample_to_device",
     "compute_time_axes",
-    # Utils - Serialization
-    "save_checkpoint", "load_checkpoint",
-    # Result Analysis
+    "save_checkpoint",
+    "load_checkpoint",
+    
+    # ===== RESULT ANALYSIS =====
     "compute_flow_metrics",
     "print_metrics_summary",
     "plot_predictions_with_context",
     "plot_metrics_by_horizon",
     "plot_full_series_with_d1_forecast",
     "plot_predictions_extremes",
-    # LinAR Interpolation
+    
+    # ===== LINAR =====
     "interpolate_linar",
     "interpolate_linear",
     "convert_to_series",
