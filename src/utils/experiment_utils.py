@@ -11,6 +11,7 @@ import shutil
 import re
 import yaml
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 import torch
 
@@ -667,7 +668,7 @@ def save_metrics(
 ) -> Dict[str, Path]:
     """
     Salva métricas em JSON e múltiplos arquivos CSV organizados por tipo de evento.
-    
+
     Suporta duas estruturas de entrada:
     1. Estrutura simples: {station: metrics} (métricas gerais por estação)
     2. Estrutura por evento: {event_type: {station: metrics}} (métricas por tipo de evento)
@@ -688,12 +689,12 @@ def save_metrics(
     metrics_dir.mkdir(parents=True, exist_ok=True)
 
     saved_paths = {}
-    
+
     # Detectar estrutura das métricas
     first_key = next(iter(metrics.keys()), None)
-    is_event_based = first_key in ['extreme', 'moderate', 'normal', 'extreme_high', 
+    is_event_based = first_key in ['extreme', 'moderate', 'normal', 'extreme_high',
                                     'extreme_low', 'moderate_high', 'moderate_low']
-    
+
     if is_event_based:
         event_types = list(metrics.keys())
     else:
@@ -716,7 +717,7 @@ def save_metrics(
             if event_type not in metrics:
                 continue
             station_metrics = metrics[event_type]
-            
+
             for station, m in station_metrics.items():
                 if not isinstance(m, dict) or 'overall' not in m:
                     continue
@@ -734,7 +735,7 @@ def save_metrics(
                     'n_windows': m.get('n_windows'),
                 }
                 rows_overall.append(row)
-        
+
         if rows_overall:
             df_overall = pd.DataFrame(rows_overall)
             csv_overall_path = metrics_dir / f"{filename_base}_overall.csv"
@@ -748,7 +749,7 @@ def save_metrics(
             if event_type not in metrics:
                 continue
             station_metrics = metrics[event_type]
-            
+
             for station, m in station_metrics.items():
                 if not isinstance(m, dict) or 'macro' not in m:
                     continue
@@ -764,7 +765,7 @@ def save_metrics(
                     'n_windows': m.get('n_windows'),
                 }
                 rows_macro.append(row)
-        
+
         if rows_macro:
             df_macro = pd.DataFrame(rows_macro)
             csv_macro_path = metrics_dir / f"{filename_base}_macro.csv"
@@ -778,12 +779,12 @@ def save_metrics(
             if event_type not in metrics:
                 continue
             station_metrics = metrics[event_type]
-            
+
             for station, m in station_metrics.items():
                 if not isinstance(m, dict) or 'per_horizon' not in m:
                     continue
                 per_horizon = m['per_horizon']
-                
+
                 if isinstance(per_horizon, dict):
                     horizons = range(1, len(per_horizon.get('rmse', [])) + 1)
                     for h_idx, h in enumerate(horizons):
@@ -798,7 +799,7 @@ def save_metrics(
                             'nse': per_horizon.get('nse', [None])[h_idx],
                         }
                         rows_per_horizon.append(row)
-        
+
         if rows_per_horizon:
             df_per_horizon = pd.DataFrame(rows_per_horizon)
             csv_per_horizon_path = metrics_dir / f"{filename_base}_per_horizon.csv"
@@ -812,9 +813,9 @@ def save_metrics(
             if event_type not in metrics:
                 continue
             station_metrics = metrics[event_type]
-            
+
             total_windows = sum(m.get('n_windows', 0) for m in station_metrics.values() if isinstance(m, dict))
-            
+
             all_overall = [m['overall'] for m in station_metrics.values() if isinstance(m, dict) and 'overall' in m]
             if all_overall:
                 row = {
@@ -827,7 +828,7 @@ def save_metrics(
                     'nse_mean': np.mean([o.get('nse') for o in all_overall if o.get('nse') is not None]),
                 }
                 rows_summary.append(row)
-        
+
         if rows_summary:
             df_summary = pd.DataFrame(rows_summary)
             csv_summary_path = metrics_dir / f"{filename_base}_summary.csv"

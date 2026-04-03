@@ -101,21 +101,98 @@ def plot_metrics_by_horizon(
     return fig
 
 def plot_full_series_with_d1_forecast(
-    preds: np.ndarray, obs: np.ndarray, stations: List[int],
-    forecast_dates: np.ndarray, df: pd.DataFrame,
+    preds: np.ndarray,
+    obs: np.ndarray,
+    stations: List[int],
+    forecast_dates: np.ndarray,
+    df: pd.DataFrame,
+    period_name: str = "Validação",
+    baseline_last: Optional[np.ndarray] = None,
     show: bool = False, figsize: tuple = (16, 5),
-) -> plt.Figure:
-    S = preds.shape[2]
+) -> None:
+    """
+    Plota série temporal completa mostrando apenas previsões D+1 (um dia à frente).
+
+    Útil para visualizar o desempenho ao longo de todo o período de validação/teste,
+    focando apenas na previsão de curto prazo (1 dia à frente).
+
+    Args:
+        preds: Previsões, shape (batch, horizon, n_stations)
+        obs: Observações, shape (batch, horizon, n_stations)
+        stations: Lista de IDs das estações
+        forecast_dates: Datas de início de cada previsão, shape (batch,)
+        df: DataFrame original com índice temporal
+        period_name: Nome do período ('Validação' ou 'Teste')
+        baseline_last: Baseline de persistência, shape (batch, n_stations)
+        figsize: Tamanho da figura
+    """
+    B, T, S = preds.shape
+
+    forecast_dates_dt = pd.to_datetime(forecast_dates)
+
+    # Determinar período a plotar (do primeiro ao último forecast + horizonte)
+    start_date = forecast_dates_dt.min()
+    end_date = forecast_dates_dt.max() + timedelta(days=T-1)
+
     fig, axes = plt.subplots(S, 1, figsize=(figsize[0], figsize[1] * S), sharex=True)
     axes = np.atleast_1d(axes)
 
-    dates_dt = pd.to_datetime(forecast_dates)
     for st_i, st_id in enumerate(stations):
         ax = axes[st_i]
-        ax.plot(df.index, df[f"Q_{st_id}"], color='black', alpha=0.2, label='Obs. Total')
-        ax.scatter(dates_dt, preds[:, 0, st_i], color='royalblue', s=10, label='D+1 Previsto', alpha=0.7)
-        ax.set_title(f"Série Temporal Completa vs Previsão D+1 - Estação {st_id}")
-        ax.legend()
+
+        # Série observada completa do período
+        period_mask = (df.index >= start_date) & (df.index <= end_date)
+        period_dates = df.index[period_mask]
+        period_obs = df[f"Q_{st_id}"].loc[period_mask].values
+
+        ax.plot(period_dates, period_obs,
+               label='Observado', color='black', linewidth=1.5, alpha=0.8)
+
+        # Previsões D+1
+        d1_forecast_dates = []
+        d1_forecast_values = []
+
+        for idx in range(B):
+            # forecast_dates[idx] já é a data t+1
+            d1_date = forecast_dates_dt[idx]
+            d1_value = preds[idx, 0, st_i]
+
+            d1_forecast_dates.append(d1_date)
+            d1_forecast_values.append(d1_value)
+
+        ax.scatter(d1_forecast_dates, d1_forecast_values,
+                  label='Previsão D+1', color='royalblue', s=20, alpha=0.7, zorder=5)
+
+        # Baseline de persistência
+        if baseline_last is not None:
+            baseline_dates = []
+            baseline_values = []
+
+            for idx in range(B):
+                # Plotar no mesmo dia (t+1)
+                d1_date = forecast_dates_dt[idx]
+                baseline_dates.append(d1_date)
+                baseline_values.append(baseline_last[idx, st_i])
+
+            ax.scatter(baseline_dates, baseline_values,
+                      label='Persistência D+1', color='darkorange',
+                      s=20, alpha=0.5, marker='x', zorder=4)
+
+        # Formatação
+        ax.set_title(
+            f'Estação {st_id} — Série Completa ({period_name}) com Previsões D+1',
+            fontsize=12, fontweight='bold'
+        )
+        ax.set_ylabel('Vazão (m³/s)', fontsize=11)
+        ax.grid(True, alpha=0.3)
+        ax.legend(loc='best', fontsize=10)
+
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+        ax.xaxis.set_major_locator(mdates.MonthLocator())
+
+        if st_i == S - 1:
+            ax.set_xlabel('Data', fontsize=11)
+            plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
 
     plt.tight_layout()
     if show: plt.show()
