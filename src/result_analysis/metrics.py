@@ -2,8 +2,11 @@
 Módulo para cálculo de métricas de desempenho do modelo.
 """
 
-from typing import Dict, Any, Optional, Sequence
+from typing import Dict, Any, Optional, Sequence, List, Union
 import numpy as np
+import pandas as pd
+import json
+from pathlib import Path
 
 
 def compute_flow_metrics(
@@ -14,23 +17,7 @@ def compute_flow_metrics(
     horizon_weights: Optional[np.ndarray] = None,
     eps: float = 1e-6,
 ) -> Dict[int, Dict[str, Any]]:
-    """
-    Calcula métricas de desempenho por estação.
-
-    Args:
-        preds: Previsões, shape (batch, horizon, n_stations)
-        obs: Observações, shape (batch, horizon, n_stations)
-        stations: Lista de IDs das estações
-        baseline_last: Baseline de persistência, shape (batch, n_stations)
-        horizon_weights: Pesos por horizonte, shape (horizon,)
-        eps: Epsilon para evitar divisão por zero
-
-    Returns:
-        Dicionário com métricas por estação:
-            - overall: métricas gerais (rmse, mae, mape, r2, nse, kge, skill_rmse)
-            - macro: médias ponderadas por horizonte
-            - per_horizon: arrays de métricas por horizonte
-    """
+    """Calcula métricas de desempenho por estação."""
     B, T, S = preds.shape
 
     if horizon_weights is None:
@@ -43,14 +30,11 @@ def compute_flow_metrics(
         y_pred = preds[:, :, st_idx].astype(np.float64)
         y_true = obs[:, :, st_idx].astype(np.float64)
 
-        # Máscara para valores válidos
         mask = ~np.isnan(y_true)
         y_pred_flat = y_pred[mask]
         y_true_flat = y_true[mask]
 
-        # ==========================================
-        # MÉTRICAS OVERALL (todas as previsões)
-        # ==========================================
+        # Overall metrics
         err_flat = y_pred_flat - y_true_flat
         rmse_overall = float(np.sqrt(np.mean(err_flat**2)))
         mae_overall = float(np.mean(np.abs(err_flat)))
@@ -60,14 +44,12 @@ def compute_flow_metrics(
             np.mean(np.abs(err_flat[mape_mask_flat]) / (np.abs(y_true_flat[mape_mask_flat]) + eps))
         ) * 100.0
 
-        # R² e NSE
         mu_true = float(np.mean(y_true_flat))
         ss_res = float(np.sum(err_flat**2))
         ss_tot = float(np.sum((y_true_flat - mu_true)**2))
         r2_overall = float(1.0 - ss_res / (ss_tot + eps))
         nse_overall = float(1.0 - ss_res / (ss_tot + eps))
 
-        # KGE
         mu_pred = float(np.mean(y_pred_flat))
         std_true = float(np.std(y_true_flat) + eps)
         std_pred = float(np.std(y_pred_flat) + eps)
@@ -77,7 +59,6 @@ def compute_flow_metrics(
         beta = mu_pred / (mu_true + eps)
         kge_overall = float(1.0 - np.sqrt((r - 1.0)**2 + (alpha - 1.0)**2 + (beta - 1.0)**2))
 
-        # Skill vs persistência
         skill_rmse_overall = None
         if baseline_last is not None:
             base_vec = baseline_last[:, st_idx].astype(np.float64)
@@ -86,9 +67,7 @@ def compute_flow_metrics(
             rmse_base = float(np.sqrt(np.mean((base_flat - y_true_flat)**2)))
             skill_rmse_overall = float(1.0 - rmse_overall / (rmse_base + eps))
 
-        # ==========================================
-        # MÉTRICAS POR HORIZONTE
-        # ==========================================
+        # Per horizon
         rmse_t, mae_t, mape_t, r2_t, nse_t = [], [], [], [], []
 
         for t in range(T):
@@ -125,18 +104,13 @@ def compute_flow_metrics(
         r2_t = np.array(r2_t, dtype=np.float64)
         nse_t = np.array(nse_t, dtype=np.float64)
 
-        # ==========================================
-        # MÉTRICAS MACRO (ponderadas)
-        # ==========================================
+        # Macro
         macro_rmse = float(np.nansum(rmse_t * horizon_weights))
         macro_mae = float(np.nansum(mae_t * horizon_weights))
         macro_mape = float(np.nansum(mape_t * horizon_weights))
         macro_r2 = float(np.nanmean(r2_t))
         macro_nse = float(np.nanmean(nse_t))
 
-        # ==========================================
-        # ARMAZENAR RESULTADOS
-        # ==========================================
         metrics[station] = {
             "overall": {
                 "rmse": rmse_overall,
@@ -166,19 +140,222 @@ def compute_flow_metrics(
     return metrics
 
 
-def print_metrics_summary(metrics: Dict[int, Dict[str, Any]]) -> None:
+def compute_metrics_by_event_type(
+    preds: np.ndarray,
+    obs: np.ndarray,
+    stations: List[int],
+    window_indices: Union[Dict[str, Dict[int, List[int]]], List[int], np.ndarray],
+    baseline_last: Optional[np.ndarray] = None,
+    horizon_weights: Optional[np.ndarray] = None,
+    eps: float = 1e-6,
+) -> Dict[str, Dict[int, Dict[str, Any]]]:
     """
-    Imprime resumo formatado das métricas.
+    Calcula métricas separadas por tipo de evento.
+    
+    window_indices pode ser:
+      - Dict {event_type: {station: [indices]}} (padrão do analyze_flow_extremes)
+      - List[int] ou np.ndarray (índices simples para todas as estações)
+    """
+    metrics_by_type = {}
+    
+    # ← NOVO: Tratamento de lista simples (índices de janelas)
+    if isinstance(window_indices, (list, np.ndarray)):
+        indices_list = list(window_indices)
+        window_indices = {'all': {station: indices_list for station in stations}}
+    
+    # Verificar se é dicionário válido
+    if not isinstance(window_indices, dict):
+        raise ValueError(
+            f"window_indices deve ser dict, list ou np.ndarray. "
+            f"Recebido: {type(window_indices)}"
+        )
+    
+    # Processar cada tipo de evento
+    for event_type, indices_dict in window_indices.items():
+        print(f"🔍 Calculando métricas para eventos: {event_type.upper()}")
 
-    Args:
-        metrics: Dicionário de métricas retornado por compute_flow_metrics
+        # indices_dict pode ser dict {station: [indices]} ou lista simples
+        if isinstance(indices_dict, dict):
+            station_indices = indices_dict
+        elif isinstance(indices_dict, (list, np.ndarray)):
+            station_indices = {station: list(indices_dict) for station in stations}
+        else:
+            print(f"  ⚠️  Tipo inválido para {event_type}, pulando")
+            continue
+
+        event_metrics = {}
+
+        for st_idx, station in enumerate(stations):
+            indices = station_indices.get(station, [])
+
+            if len(indices) == 0:
+                print(f"  ⚠️  Estação {station}: 0 janelas, pulando")
+                continue
+
+            # ← NOVO: Filtrar índices válidos (dentro do range)
+            valid_indices = [i for i in indices if 0 <= i < preds.shape[0]]
+            
+            if len(valid_indices) == 0:
+                print(f"  ⚠️  Estação {station}: nenhum índice válido, pulando")
+                continue
+
+            preds_filtered = preds[valid_indices, :, st_idx:st_idx+1]
+            obs_filtered = obs[valid_indices, :, st_idx:st_idx+1]
+
+            baseline_filtered = None
+            if baseline_last is not None:
+                baseline_filtered = baseline_last[valid_indices, st_idx:st_idx+1]
+
+            station_metrics = compute_flow_metrics(
+                preds=preds_filtered,
+                obs=obs_filtered,
+                stations=[station],
+                baseline_last=baseline_filtered,
+                horizon_weights=horizon_weights,
+                eps=eps
+            )
+
+            station_metrics[station]['n_windows'] = len(valid_indices)
+            event_metrics[station] = station_metrics[station]
+            print(f"  ✅ Estação {station}: {len(valid_indices)} janelas processadas")
+
+        metrics_by_type[event_type] = event_metrics
+
+    return metrics_by_type
+
+
+def save_metrics(
+    metrics: Dict[str, Any],
+    experiment_name: str,
+    filename_base: str = "metrics",
+    base_dir: Optional[str] = None,
+    save_json: bool = True,
+    save_csv: bool = True,
+) -> Dict[str, str]:
     """
-    print("\n" + "="*80)
+    Salva métricas em JSON e um único CSV unificado com todos os eventos.
+    """
+    # Importar função do experiment_utils
+    try:
+        from src.utils.experiment_utils import get_experiment_path
+        exp_path = get_experiment_path(experiment_name)
+    except ImportError:
+        exp_path = Path("outputs/experiments") / experiment_name
+
+    if base_dir is not None:
+        exp_path = Path(base_dir) / experiment_name
+
+    metrics_dir = exp_path / "predictions_test" / "metrics"
+    metrics_dir.mkdir(parents=True, exist_ok=True)
+
+    saved_paths = {}
+
+    # Detectar estrutura
+    first_key = next(iter(metrics.keys()), None)
+    is_event_based = first_key in ['extreme', 'moderate', 'normal']
+
+    if is_event_based:
+        event_types = list(metrics.keys())
+    else:
+        event_types = ['overall']
+        metrics = {'overall': metrics}
+
+    # ======== JSON COMPLETO ========
+    if save_json:
+        json_path = metrics_dir / f"{filename_base}.json"
+        with open(json_path, 'w', encoding='utf-8') as f:
+            json.dump(metrics, f, indent=2, default=str)
+        saved_paths["json"] = str(json_path)
+        print(f"💾 Métricas salvas (JSON): {json_path}")
+
+    # ======== CSV ÚNICO COM TUDO ========
+    if save_csv:
+        all_rows = []
+
+        for event_type in event_types:
+            if event_type not in metrics:
+                continue
+            station_metrics = metrics[event_type]
+
+            for station, m in station_metrics.items():
+                if not isinstance(m, dict):
+                    continue
+
+                # Overall
+                if 'overall' in m:
+                    overall = m['overall']
+                    row = {
+                        'event_type': event_type,
+                        'station': station,
+                        'metric_level': 'overall',
+                        'rmse': overall.get('rmse'),
+                        'mae': overall.get('mae'),
+                        'mape': overall.get('mape'),
+                        'r2': overall.get('r2'),
+                        'nse': overall.get('nse'),
+                        'kge': overall.get('kge'),
+                        'skill_rmse': overall.get('skill_rmse'),
+                        'n_windows': m.get('n_windows'),
+                    }
+                    all_rows.append(row)
+
+                # Macro
+                if 'macro' in m:
+                    macro = m['macro']
+                    row = {
+                        'event_type': event_type,
+                        'station': station,
+                        'metric_level': 'macro',
+                        'rmse': macro.get('rmse'),
+                        'mae': macro.get('mae'),
+                        'mape': macro.get('mape'),
+                        'r2': macro.get('r2'),
+                        'nse': macro.get('nse'),
+                        'kge': None,
+                        'skill_rmse': None,
+                        'n_windows': m.get('n_windows'),
+                    }
+                    all_rows.append(row)
+
+                # Per horizon
+                if 'per_horizon' in m:
+                    per_horizon = m['per_horizon']
+                    if isinstance(per_horizon, dict):
+                        n_horizons = len(per_horizon.get('rmse', []))
+                        for h in range(n_horizons):
+                            row = {
+                                'event_type': event_type,
+                                'station': station,
+                                'metric_level': f'horizon_{h+1}',
+                                'rmse': per_horizon.get('rmse', [None])[h],
+                                'mae': per_horizon.get('mae', [None])[h],
+                                'mape': per_horizon.get('mape', [None])[h],
+                                'r2': per_horizon.get('r2', [None])[h],
+                                'nse': per_horizon.get('nse', [None])[h],
+                                'kge': None,
+                                'skill_rmse': None,
+                                'n_windows': m.get('n_windows'),
+                            }
+                            all_rows.append(row)
+
+        if all_rows:
+            df_all = pd.DataFrame(all_rows)
+            csv_path = metrics_dir / f"{filename_base}.csv"
+            df_all.to_csv(csv_path, index=False, sep=';')
+            saved_paths["csv"] = str(csv_path)
+            print(f"💾 Métricas salvas (CSV único): {csv_path}")
+
+    return saved_paths
+
+
+def print_metrics_summary(metrics: Dict[int, Dict[str, Any]]) -> None:
+    """Imprime resumo formatado das métricas."""
+    print("" + "="*80)
     print("RESUMO DAS MÉTRICAS POR ESTAÇÃO")
     print("="*80)
 
     for station, station_metrics in metrics.items():
-        print(f"\n📍 Estação {station}")
+        print(f"📍 Estação {station}")
         print("-" * 60)
 
         overall = station_metrics["overall"]
@@ -193,11 +370,45 @@ def print_metrics_summary(metrics: Dict[int, Dict[str, Any]]) -> None:
             print(f"    Skill RMSE: {overall['skill_rmse']:.4f}")
 
         macro = station_metrics["macro"]
-        print("\n  Macro (ponderado por horizonte):")
+        print("Macro (ponderado por horizonte):")
         print(f"    RMSE:       {macro['rmse']:.3f} m³/s")
         print(f"    MAE:        {macro['mae']:.3f} m³/s")
         print(f"    MAPE:       {macro['mape']:.2f}%")
         print(f"    R²:         {macro['r2']:.4f}")
         print(f"    NSE:        {macro['nse']:.4f}")
 
-    print("\n" + "="*80)
+    print("" + "="*80)
+
+
+def print_metrics_comparison_by_event(
+    metrics_by_type: Dict[str, Dict[int, Dict[str, Any]]],
+    stations: List[int]
+) -> None:
+    """Imprime comparação de métricas entre tipos de eventos."""
+    print("" + "="*80)
+    print("COMPARAÇÃO DE MÉTRICAS POR TIPO DE EVENTO")
+    print("="*80)
+
+    for station in stations:
+        print(f"📍 Estação {station}")
+        print("-" * 60)
+        print(f"{'Tipo':<12} {'RMSE':>10} {'MAE':>10} {'R²':>10} {'NSE':>10} {'KGE':>10}")
+        print("-" * 60)
+
+        for event_type in ['extreme', 'moderate', 'normal']:
+            if event_type not in metrics_by_type:
+                continue
+
+            if station not in metrics_by_type[event_type]:
+                print(f"{event_type:<12} {'N/A':>10} {'N/A':>10} {'N/A':>10} {'N/A':>10} {'N/A':>10}")
+                continue
+
+            overall = metrics_by_type[event_type][station]['overall']
+            print(f"{event_type:<12} "
+                  f"{overall['rmse']:>10.3f} "
+                  f"{overall['mae']:>10.3f} "
+                  f"{overall['r2']:>10.4f} "
+                  f"{overall['nse']:>10.4f} "
+                  f"{overall['kge']:>10.4f}")
+
+    print("" + "="*80)

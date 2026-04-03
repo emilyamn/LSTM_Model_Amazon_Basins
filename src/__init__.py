@@ -62,14 +62,38 @@ from .utils.serialization import (
     load_checkpoint
 )
 
+from .utils.experiment_utils import (
+    convert_predictions_to_df,
+    create_experiment,
+    load_experiment,
+    save_model,
+    save_predictions,
+    save_metrics,
+    save_plot,
+    list_experiments,
+    print_experiment_summary,
+    get_experiment_path,
+    find_experiment_by_name
+)
+
 # Importações principais - Result Analysis
-from .result_analysis import (
+from .result_analysis.extract_flow_extremes import (
+    analyze_flow_extremes,
+)
+
+from .result_analysis.metrics import (
     compute_flow_metrics,
     print_metrics_summary,
+    compute_metrics_by_event_type,
+    print_metrics_comparison_by_event,
+)
+
+from .result_analysis.plots import (
     plot_predictions_with_context,
     plot_metrics_by_horizon,
     plot_full_series_with_d1_forecast,
-    plot_predictions_extremes
+    plot_predictions_extremes,
+    plot_metrics_by_horizon_comparison
 )
 
 # Importações principais - LinAR
@@ -119,6 +143,7 @@ __all__ = [
     "multi_step_loss",
     
     # ===== UTILS =====
+    "convert_predictions_to_df",
     "ConfigLoader",
     "load_feature_config",
     "load_split_config",
@@ -130,6 +155,16 @@ __all__ = [
     "compute_time_axes",
     "save_checkpoint",
     "load_checkpoint",
+    "create_experiment",
+    "load_experiment",
+    "save_model",
+    "save_predictions",
+    "save_metrics",
+    "save_plot",
+    "list_experiments",
+    "print_experiment_summary",
+    "get_experiment_path",
+    "find_experiment_by_name",
     
     # ===== RESULT ANALYSIS =====
     "compute_flow_metrics",
@@ -137,7 +172,9 @@ __all__ = [
     "plot_predictions_with_context",
     "plot_metrics_by_horizon",
     "plot_full_series_with_d1_forecast",
-    "plot_predictions_extremes",
+    "analyze_flow_extremes",
+    "compute_metrics_by_event_type",
+    "print_metrics_comparison_by_event",
     
     # ===== LINAR =====
     "interpolate_linar",

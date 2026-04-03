@@ -115,7 +115,7 @@ def multi_step_loss(
         + lambda_negative * neg_penalty
         + lambda_continuity * continuity_penalty
         + lambda_gate_bias * gate_penalty
-        + lambda_direction * direction_penalty
+        #+ lambda_direction * direction_penalty
     )
     
     return total_loss

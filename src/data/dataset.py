@@ -440,35 +440,88 @@ class HydroDataset(Dataset):
 def create_temporal_split_with_gap(
     dataset: HydroDataset,
     train_ratio: float = 0.95,
+    val_ratio: float = 0.025,
+    test_ratio: float = 0.025,
     gap: Optional[int] = None,
     exclude_reserved: bool = True
-) -> Tuple[Subset, Subset]:
+) -> Tuple[Subset, Subset, Subset]:
     """
-    Cria split temporal com gap.
+    Cria split temporal com gap considerando train, val e test ratios.
 
     Args:
+        dataset: Dataset hidrológico
+        train_ratio: Proporção para treino (ex: 0.95 = 95%)
+        val_ratio: Proporção para validação (ex: 0.025 = 2.5%)
+        test_ratio: Proporção para teste (ex: 0.025 = 2.5%)
+        gap: Gap (em dias) entre treino e validação
         exclude_reserved: Se True, não inclui dias reservados no split
+    
+    Returns:
+        Tuple de (train_subset, val_subset, test_subset)
+    
+    Raises:
+        ValueError: Se as proporções não somarem 1.0
     """
+    # Validar que as proporções somam 1.0
+    total_ratio = train_ratio + val_ratio + test_ratio
+    if not np.isclose(total_ratio, 1.0, rtol=1e-5):
+        raise ValueError(
+            f"As proporções devem somar 1.0. "
+            f"train_ratio={train_ratio}, val_ratio={val_ratio}, "
+            f"test_ratio={test_ratio} -> total={total_ratio}"
+        )
+    
     n = len(dataset)  # Já considera reserve_last_days
-
-    # O dataset já removeu os índices reservados, então n já é "correto"
-    split_idx = int(n * train_ratio)
-    split_idx = min(max(split_idx, 1), n - 1)
-
+    
+    # Calcular tamanhos dos splits
+    train_end_idx = int(n * train_ratio)
+    val_start_idx = int(n * (train_ratio + val_ratio))
+    
+    # Garantir que os índices são válidos
+    train_end_idx = min(max(train_end_idx, 1), n - 1)
+    val_start_idx = min(max(val_start_idx, train_end_idx + 1), n)
+    
+    # Calcular gap mínimo baseado no encoder/decoder
     enc_min = int(dataset.encoder_offsets[0])
     dec_max = int(dataset.decoder_offsets[-1])
     min_gap_centers = dec_max - enc_min + 1
-
+    
     eff_gap = min_gap_centers if gap is None else max(gap, min_gap_centers)
-    val_start = min(split_idx + eff_gap, n)
-
-    train_indices = list(range(0, split_idx))
-    val_indices = list(range(val_start, n))
-
+    
+    # Ajustar val_start para incluir o gap
+    val_start_with_gap = min(train_end_idx + eff_gap, n)
+    
+    # Criar os índices
+    train_indices = list(range(0, train_end_idx))
+    
+    # Validação começa após o gap (se houver espaço)
+    if val_start_with_gap < val_start_idx:
+        val_indices = list(range(val_start_with_gap, val_start_idx))
+    else:
+        # Se não há espaço para gap, usa o que sobrar
+        val_indices = list(range(train_end_idx, val_start_idx))
+    
+    # Teste é sempre o último conjunto
+    test_indices = list(range(val_start_idx, n))
+    
+    # Fallback: se algum conjunto ficou vazio, redistribuir
     if len(val_indices) == 0:
-        val_indices = list(range(split_idx, n))
-
-    return Subset(dataset, train_indices), Subset(dataset, val_indices)
+        if len(test_indices) > 1:
+            split_point = len(test_indices) // 2
+            val_indices = test_indices[:split_point]
+            test_indices = test_indices[split_point:]
+        else:
+            val_indices = list(range(train_end_idx, n))
+            test_indices = []
+    
+    if len(test_indices) == 0:
+        test_indices = [n - 1] if n > 1 else []
+    
+    return (
+        Subset(dataset, train_indices),
+        Subset(dataset, val_indices),
+        Subset(dataset, test_indices)
+    )
 
 def create_dataset_for_training_validation(
     df: pd.DataFrame,

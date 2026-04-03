@@ -1,4 +1,9 @@
 # ==========================================================
+# NOMENCLATURA DESCRITIVA DO EXPERIMENTO 
+# ==========================================================
+experiment_name: no_loss_direction
+
+# ==========================================================
 # CONFIGURAÇÕES DE ESTAÇÕES E ATRIBUTOS ESTÁTICOS
 # ==========================================================
 stations: [10100000, 13150000, 14100000]
@@ -68,7 +73,7 @@ reference_dates: ['2026-03-16']
 
 split_config:
   train_ratio: 0.95
-  val_ratio: 0.05
-  test_ratio: 0.00
+  val_ratio: 0.025
+  test_ratio: 0.025
   gap: 128
   window_stride: 1
