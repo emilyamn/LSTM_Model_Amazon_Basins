@@ -1,0 +1,13 @@
+{
+  "exp_id": 7,
+  "branch_name": "Improve_model_performance",
+  "exp_name": "no_loss_direction",
+  "exp_dir": "C:\\Users\\emily\\Documents\\GitHub\\Mini-curso-GitHub-Leo\\outputs\\experiments\\exp_007_Improve_model_performance_no_loss_direction",
+  "created_at": "2026-04-06 23:42:42",
+  "description": "Modelo LSTM baseline com 30 dias de hist\u00f3rico sem loss de dire\u00e7\u00e3o",
+  "config_files": [
+    "data_config.yaml",
+    "model_config.yaml",
+    "training_config.yaml"
+  ]
+}

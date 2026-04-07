@@ -375,19 +375,26 @@ class HydroDataset(Dataset):
                 static_feats.append(scaler.transform(val).item())
         return np.array(static_feats, dtype=np.float32)
 
-    def _build_target(self, center: int) -> np.ndarray:
-        """Constrói alvo para previsão."""
+    def _build_target(self, center: int) -> Tuple[np.ndarray, np.ndarray]:
+        """Constrói alvo e máscara de validade para previsão."""
         future_offsets = self.decoder_offsets[self.decoder_offsets >= 0]
         target = np.zeros((len(future_offsets), len(self.stations)), dtype=np.float32)
+        target_mask = np.zeros((len(future_offsets), len(self.stations)), dtype=np.float32)
+
         for st_idx, station in enumerate(self.stations):
             scaler = self.flow_scalers[f"Q_{station}"]
             series = self.df[f"Q_{station}"].to_numpy()
             idxs = center + future_offsets
-            values = np.zeros_like(future_offsets, dtype=np.float32)
-            mask = (idxs >= 0) & (idxs < len(series))
-            values[mask] = series[idxs[mask]]
-            target[:, st_idx] = scaler.transform(torch.from_numpy(values).float()).numpy()
-        return target
+
+            for i, idx in enumerate(idxs):
+                if 0 <= idx < len(series) and not np.isnan(series[idx]):
+                    target[i, st_idx] = scaler.transform(
+                        torch.tensor(series[idx]).float()
+                    ).item()
+                    target_mask[i, st_idx] = 1.0
+                # else: mantém 0.0 em target e 0.0 em mask
+
+        return target, target_mask
 
     def __getitem__(self, idx):
         center = self.valid_centers[idx]
@@ -401,13 +408,29 @@ class HydroDataset(Dataset):
         temp_enc = self._build_temporal_block(center, "encoder")
         temp_dec = self._build_temporal_block(center, "decoder")
         static_vec = self._build_static_vector(center)
-        target = self._build_target(center)
+        
+        target, target_mask = self._build_target(center)  # ← agora retorna dois valores
 
         encoder_dyn = np.stack(flow_enc + climate_obs_enc, axis=-1)
         decoder_dyn = np.stack(flow_dec + climate_fc_dec, axis=-1)
 
         mask_enc = np.stack(mask_enc, axis=-1)
-        mask_dec = np.stack(mask_dec, axis=-1)
+        mask_dec_history = np.stack(mask_dec, axis=-1)  # shape: (decoder_length, 6)
+
+        # Expandir target_mask de (horizon, 3) para (horizon, 6)
+        # _build_flow_block gera uma coluna por spec por estação
+        # a ordem é [st0_spec0, st0_spec1, st1_spec0, st1_spec1, ...]
+        # então np.repeat replica cada estação para cobrir suas specs
+        n_flow_cols = mask_dec_history.shape[1]      # 6
+        n_stations_cols = target_mask.shape[1]        # 3
+        reps = n_flow_cols // n_stations_cols         # 2 specs por estação
+
+        target_mask_expanded = np.repeat(target_mask, reps, axis=1)  # (horizon, 6)
+
+        full_mask_dec = np.concatenate([
+            mask_dec_history[:self.decoder_history, :],  # (decoder_history, 6)
+            target_mask_expanded,                         # (decoder_horizon, 6)
+        ], axis=0)  # (decoder_length, 6) ✅
 
         last_obs = []
         for st in self.stations:
@@ -430,7 +453,7 @@ class HydroDataset(Dataset):
             temporal_dec=torch.tensor(temp_dec, dtype=torch.float32),
             target=torch.tensor(target, dtype=torch.float32),
             mask_enc=torch.tensor(mask_enc, dtype=torch.float32),
-            mask_dec=torch.tensor(mask_dec, dtype=torch.float32),
+            mask_dec=torch.tensor(full_mask_dec, dtype=torch.float32),
             baseline_last=last_obs,
             forecast_date=forecast_date,
             date_index=center,
@@ -609,7 +632,8 @@ def create_dataset_for_inference(
     api_k_list: List[float],
     static_keys: List[str],
     reference_dates: Optional[List[pd.Timestamp]] = None,
-    forcings: str = "P"
+    forcings: str = "P",
+    meta: dict = None
 ) -> HydroDataset:
     """
     Cria dataset para inferência em produção.
@@ -662,7 +686,7 @@ def create_dataset_for_inference(
         df=df,
         stations=stations,
         static_attrs=static_attrs,
-        train_indices=train_indices,
+        train_indices=np.array([0]),
         forecast_cols=forecast_cols,
         flow_window_config=flow_window_config,
         climate_window_config=climate_window_config,
@@ -674,6 +698,21 @@ def create_dataset_for_inference(
         forcings=forcings
     )
 
+    # Injetar scalers do treino imediatamente, antes de qualquer acesso
+    if meta is not None:
+        dataset.flow_scalers = meta["flow_scalers"]
+        dataset.climate_scalers = meta["climate_scalers"]
+        dataset.static_scalers = meta["static_scalers"]
+        
+        # Copiar dP_obs → dP_forecast
+        for station in stations:
+            obs_key = f'dP_obs_dt_{station}'
+            fc_key  = f'dP_forecast_dt_{station}'
+            if obs_key in dataset.climate_scalers:
+                dataset.climate_scalers[fc_key] = dataset.climate_scalers[obs_key]
+    else:
+        raise ValueError("meta é obrigatório para inferência — scalers do treino são necessários")
+    
     # Se não especificou datas, usar apenas a última válida
     if reference_dates is None:
         if len(dataset.valid_centers) > 0:
