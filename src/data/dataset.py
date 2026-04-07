@@ -1,5 +1,7 @@
 """
 Dataset hidrológico para treino de modelos de deep learning.
+
+- Série de precipitação UNIFICADA: `precipitation_{station}` para encoder e decoder.
 """
 
 from typing import Dict, List, Tuple, Optional
@@ -21,7 +23,6 @@ class HydroDataset(Dataset):
         stations: List[int],
         static_attrs: Dict[int, Dict[str, float]],
         train_indices: np.ndarray,
-        forecast_cols: Dict[int, Tuple[str, str]],
         flow_window_config: Dict,
         climate_window_config: Dict,
         temporal_features: List[str],
@@ -29,12 +30,18 @@ class HydroDataset(Dataset):
         static_keys: List[str],
         window_stride: int = 1,
         reserve_last_days: int = 0,
-        forcings: str = "P",  # ✅ NOVO PARÂMETRO
+        forcings: str = "P",
+        # Parâmetro legado — aceito mas ignorado
+        forecast_cols: Optional[Dict] = None,
     ):
+        if forecast_cols is not None:
+            print(
+                "⚠️  'forecast_cols' não é mais utilizado (série unificada). "
+                "Parâmetro ignorado."
+            )
         self.df = df
         self.stations = stations
         self.static_attrs = static_attrs
-        self.forecast_cols = forecast_cols
         self.flow_window_config = flow_window_config
         self.climate_window_config = climate_window_config
         self.temporal_features = temporal_features
@@ -42,16 +49,13 @@ class HydroDataset(Dataset):
         self.static_keys = static_keys
         self.window_stride = window_stride
         self.reserve_last_days = reserve_last_days
-        self.forcings = forcings  # ✅ SALVAR
+        self.forcings = forcings
 
-        # Escaladores dinâmicos
-        self.flow_scalers = {}
-        self.climate_scalers = {}
+        self.flow_scalers: Dict[str, Scaler] = {}
+        self.climate_scalers: Dict[str, Scaler] = {}
 
-        # Registrar escaladores
         self._register_scalers(train_indices)
 
-        # Calcular eixos temporais
         (
             self.encoder_offsets,
             self.decoder_offsets,
@@ -61,175 +65,143 @@ class HydroDataset(Dataset):
 
         self.encoder_length = len(self.encoder_offsets)
         self.decoder_length = len(self.decoder_offsets)
-
-        # Construir índices válidos (com verificação de NaNs)
         self.valid_centers = self._build_valid_indices()
 
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
     def _get_cols_by_prefix(self, prefix: str, station: int) -> List[str]:
-        """
-        Retorna todas as colunas do DF que começam com 'prefix' e terminam com '_{station}'.
-        Ordena alfabeticamente para garantir determinismo.
-        """
+        """Retorna colunas que começam com `prefix` e terminam com `_{station}`, ordenadas."""
         suffix = f"_{station}"
-        cols = [
+        return sorted(
             c for c in self.df.columns
             if c.startswith(prefix) and c.endswith(suffix)
-        ]
-        cols.sort()
-        return cols
+        )
+
+    # ------------------------------------------------------------------
+    # Scalers
+    # ------------------------------------------------------------------
 
     def _register_scalers(self, train_indices: np.ndarray):
-        """Registra escaladores para todas as features."""
-        def register_scaler(col_name):
+        """Registra escaladores para todas as features usando os novos nomes de colunas."""
+
+        def register(col_name: str):
             if col_name in self.df.columns:
                 self.climate_scalers[col_name] = compute_scaler(
                     self.df[col_name].iloc[train_indices].to_numpy()
                 )
 
-        need_et = (self.forcings == "P_ET")
+        need_et = self.forcings == "P_ET"
 
         for st in self.stations:
-            # 1. Vazão Alvo
-            q_col = f"Q_{st}"
-            self.flow_scalers[q_col] = compute_scaler(
-                self.df[q_col].iloc[train_indices].to_numpy()
+            # Vazão
+            self.flow_scalers[f"Q_{st}"] = compute_scaler(
+                self.df[f"Q_{st}"].iloc[train_indices].to_numpy()
             )
 
-            # 2. Clima Básico
-            # ✅ CORRIGIR: precipitation_chirps → precipitation_obs
-            precip_obs = f"precipitation_obs_{st}"
-            register_scaler(precip_obs)
+            # Precipitação unificada
+            register(f"precipitation_{st}")
 
+            # ET unificada
             if need_et:
-                et_obs = f"potential_evapotransp_gleam_{st}"
-                register_scaler(et_obs)
+                register(f"et_{st}")
 
-            # ✅ UNPACKING CONDICIONAL
-            forecast_info = self.forecast_cols[st]
-            if isinstance(forecast_info, tuple):
-                if len(forecast_info) == 2:
-                    precip_fc, et_fc = forecast_info
-                elif len(forecast_info) == 1:
-                    precip_fc = forecast_info[0]
-                    et_fc = None
-                else:
-                    raise ValueError(f"forecast_cols[{st}] deve ter 1 ou 2 elementos")
-            else:
-                # Se for string única
-                precip_fc = forecast_info
-                et_fc = None
+            # Médias móveis e acumulados (prefixo unificado)
+            for col in self._get_cols_by_prefix("precipitation_ma", st):
+                register(col)
+            for col in self._get_cols_by_prefix("precipitation_cum", st):
+                register(col)
 
-            register_scaler(precip_fc)
-
-            if need_et and et_fc is not None:
-                register_scaler(et_fc)
-
-            # ✅ ET forecast APENAS SE forcings="P_ET"
+            # ET médias móveis
             if need_et:
-                register_scaler(et_fc)
+                for col in self._get_cols_by_prefix("et_ma", st):
+                    register(col)
 
-            # 3. Médias Móveis e Acumulados
-            # ✅ CORRIGIR todos os prefixos
-            for col in self._get_cols_by_prefix("precipitation_obs_ma", st):
-                register_scaler(col)
+            # API (prefixo unificado: api_k)
+            for col in self._get_cols_by_prefix("api_k", st):
+                register(col)
 
-            for col in self._get_cols_by_prefix("precipitation_forecast_ma", st):
-                register_scaler(col)
-
-            for col in self._get_cols_by_prefix("precipitation_obs_cum", st):
-                register_scaler(col)
-
-            for col in self._get_cols_by_prefix("precipitation_forecast_cum", st):
-                register_scaler(col)
-
-            # 4. APIs
-            # ✅ CORRIGIR: api_chirps_k → api_obs_k
-            for col in self._get_cols_by_prefix("api_obs_k", st):
-                register_scaler(col)
-
-            for col in self._get_cols_by_prefix("api_forecast_k", st):
-                register_scaler(col)
-
-            # 5. Derivadas e Regime
-            register_scaler(f"dQ_dt_{st}")
-
-            # ✅ CORRIGIR: dP_dt → dP_obs_dt
-            register_scaler(f"dP_obs_dt_{st}")
-
-            register_scaler(f"dP_dt_forecast_{st}")
+            # Derivadas e regime
+            register(f"dQ_dt_{st}")
+            register(f"dP_dt_{st}")
 
             if f"regime_state_{st}" in self.df.columns:
                 self.climate_scalers[f"regime_state_{st}"] = compute_scaler(
                     self.df[f"regime_state_{st}"].iloc[train_indices].astype(np.float32).to_numpy()
                 )
 
-            # 6. Log-Anomaly
-            register_scaler(f"log_anomaly_{st}")
+            # Log-anomaly
+            register(f"log_anomaly_{st}")
             for col in self._get_cols_by_prefix("log_anomaly_ma", st):
-                register_scaler(col)
+                register(col)
 
         # Escaladores estáticos
         self.static_scalers: Dict[str, Scaler] = {}
         for key in self.static_keys:
-            vals = np.array([self.static_attrs[st][key] for st in self.stations], dtype=np.float32)
+            vals = np.array(
+                [self.static_attrs[st][key] for st in self.stations], dtype=np.float32
+            )
             self.static_scalers[key] = compute_scaler(vals)
 
+    # ------------------------------------------------------------------
+    # Índices válidos
+    # ------------------------------------------------------------------
+
     def _build_valid_indices(self) -> List[int]:
-        """
-        Constrói lista de índices válidos para centers.
-        Agora considera reserva de dias ao final.
-        """
         enc_min_offset = int(self.encoder_offsets[0])
         dec_max_offset = int(self.decoder_offsets[-1])
-
         window_size = dec_max_offset - enc_min_offset + 1
-        flow_cols = [f"Q_{st}" for st in self.stations]
 
+        flow_cols = [f"Q_{st}" for st in self.stations]
         valid_rows = self.df[flow_cols].notna().all(axis=1).astype(int)
-        rolling_valid = valid_rows.rolling(window=window_size).min()
-        rolling_valid_np = rolling_valid.to_numpy()
+        rolling_valid = valid_rows.rolling(window=window_size).min().to_numpy()
 
         start = -enc_min_offset
-
-        # MUDANÇA CRÍTICA: Subtrair dias reservados
         end = len(self.df) - dec_max_offset - self.reserve_last_days
 
-        valid_centers = []
-
-        for c in range(start, end, self.window_stride):
-            check_idx = c + dec_max_offset
-            if 0 <= check_idx < len(rolling_valid_np):
-                if rolling_valid_np[check_idx] == 1.0:
-                    valid_centers.append(c)
-
-        return valid_centers
+        return [
+            c for c in range(start, end, self.window_stride)
+            if 0 <= c + dec_max_offset < len(rolling_valid)
+            and rolling_valid[c + dec_max_offset] == 1.0
+        ]
 
     def __len__(self):
         return len(self.valid_centers)
 
-    def _slice_series(self, series: pd.Series, center: int, offsets: np.ndarray) -> np.ndarray:
-        """Corta uma série temporal com offsets relativos ao center."""
+    # ------------------------------------------------------------------
+    # Construção de blocos
+    # ------------------------------------------------------------------
+
+    def _slice_series(
+        self, series: pd.Series, center: int, offsets: np.ndarray
+    ) -> np.ndarray:
         idxs = center + offsets
-        clip_mask = (idxs >= 0) & (idxs < len(series))
-        values = np.full_like(offsets, fill_value=np.nan, dtype=np.float32)
-        values[clip_mask] = series.iloc[idxs[clip_mask]].to_numpy()
+        clip = (idxs >= 0) & (idxs < len(series))
+        values = np.full(len(offsets), np.nan, dtype=np.float32)
+        values[clip] = series.iloc[idxs[clip]].to_numpy()
         return values
 
-    def _transform_and_append(self, col_name: str, center: int, offsets: np.ndarray, target_list: List[np.ndarray]):
-        """Helper para cortar, escalar e adicionar à lista se a coluna existir."""
-        if col_name in self.df.columns:
+    def _transform_and_append(
+        self,
+        col_name: str,
+        center: int,
+        offsets: np.ndarray,
+        target_list: List[np.ndarray],
+    ):
+        """Corta, escala e adiciona à lista se a coluna existir."""
+        if col_name in self.df.columns and col_name in self.climate_scalers:
             series = self._slice_series(self.df[col_name], center, offsets)
             scaler = self.climate_scalers[col_name]
-            norm_vals = scaler.transform(
-                torch.from_numpy(series).float()
-            ).numpy()
-            target_list.append(norm_vals)
+            target_list.append(
+                scaler.transform(torch.from_numpy(series).float()).numpy()
+            )
 
-    def _build_flow_block(self, center: int, stage: str) -> Tuple[List[np.ndarray], List[np.ndarray]]:
-        """Constrói bloco de features de fluxo."""
+    def _build_flow_block(
+        self, center: int, stage: str
+    ) -> Tuple[List[np.ndarray], List[np.ndarray]]:
         global_offsets = self.encoder_offsets if stage == "encoder" else self.decoder_offsets
-        flow_arrays: List[np.ndarray] = []
-        mask_arrays: List[np.ndarray] = []
+        flow_arrays, mask_arrays = [], []
 
         for station in self.stations:
             for spec in self.flow_window_config[station][stage]:
@@ -254,7 +226,9 @@ class HydroDataset(Dataset):
 
                 scaler = self.flow_scalers[f"Q_{spec['source']}"]
                 norm_values = scaler.transform(
-                    torch.from_numpy(np.nan_to_num(aligned_values, nan=scaler.mean)).float()
+                    torch.from_numpy(
+                        np.nan_to_num(aligned_values, nan=scaler.mean)
+                    ).float()
                 ).numpy()
 
                 flow_arrays.append(norm_values)
@@ -262,97 +236,105 @@ class HydroDataset(Dataset):
 
         return flow_arrays, mask_arrays
 
-    def _build_climate_block(self, center: int, stage: str) -> Tuple[List[np.ndarray], List[np.ndarray]]:
-        """Constrói bloco de features climáticas."""
+    def _build_climate_block(
+        self, center: int, stage: str
+    ) -> Tuple[List[np.ndarray], List[np.ndarray]]:
         offsets = self.encoder_offsets if stage == "encoder" else self.decoder_offsets
-        obs_arrays: List[np.ndarray] = []
-        fc_arrays: List[np.ndarray] = []
+        arrays: List[np.ndarray] = []
 
         for station in self.stations:
             if stage == "encoder":
-                self._add_encoder_features(station, center, offsets, obs_arrays)
+                self._add_encoder_features(station, center, offsets, arrays)
             else:
-                self._add_decoder_features(station, center, offsets, fc_arrays)
+                self._add_decoder_features(station, center, offsets, arrays)
 
-        return obs_arrays, fc_arrays
+        # Retorna (obs_arrays, fc_arrays) para manter compatibilidade com __getitem__
+        # Agora ambos são o mesmo — retornamos arrays em obs e lista vazia em fc
+        return arrays, []
 
-    def _add_encoder_features(self, station: int, center: int, offsets: np.ndarray, arrays: List[np.ndarray]):
-        """Adiciona features do encoder de forma dinâmica."""
-        need_et = (self.forcings == "P_ET")
+    def _add_encoder_features(
+        self,
+        station: int,
+        center: int,
+        offsets: np.ndarray,
+        arrays: List[np.ndarray],
+    ):
+        """Features do encoder: precipitação unificada + derivadas de fluxo."""
+        need_et = self.forcings == "P_ET"
 
-        # 1. Clima Básico
-        # ✅ CORRIGIR: precipitation_chirps → precipitation_obs
-        self._transform_and_append(f"precipitation_obs_{station}", center, offsets, arrays)
+        # Precipitação unificada
+        self._transform_and_append(f"precipitation_{station}", center, offsets, arrays)
 
+        # ET
         if need_et:
-            # ✅ CORRIGIR: potential_evapotransp_gleam é o nome correto
-            self._transform_and_append(f"potential_evapotransp_gleam_{station}", center, offsets, arrays)
+            self._transform_and_append(f"et_{station}", center, offsets, arrays)
 
-        # 2. Médias Móveis e Acumulados
-        # ✅ CORRIGIR: precipitation_chirps_ma → precipitation_obs_ma
-        for col in self._get_cols_by_prefix("precipitation_obs_ma", station):
+        # Médias móveis e acumulados
+        for col in self._get_cols_by_prefix("precipitation_ma", station):
+            self._transform_and_append(col, center, offsets, arrays)
+        for col in self._get_cols_by_prefix("precipitation_cum", station):
             self._transform_and_append(col, center, offsets, arrays)
 
-        # ✅ CORRIGIR: precipitation_chirps_cum → precipitation_obs_cum
-        for col in self._get_cols_by_prefix("precipitation_obs_cum", station):
+        # ET médias móveis
+        if need_et:
+            for col in self._get_cols_by_prefix("et_ma", station):
+                self._transform_and_append(col, center, offsets, arrays)
+
+        # API
+        for col in self._get_cols_by_prefix("api_k", station):
             self._transform_and_append(col, center, offsets, arrays)
 
-        # 3. APIs
-        # ✅ CORRIGIR: api_chirps_k → api_obs_k
-        for col in self._get_cols_by_prefix("api_obs_k", station):
-            self._transform_and_append(col, center, offsets, arrays)
-
-        # 4. Derivadas e Regime
+        # Derivadas de fluxo e precipitação (disponíveis no passado)
         self._transform_and_append(f"dQ_dt_{station}", center, offsets, arrays)
-
-        # ✅ CORRIGIR: dP_dt → dP_obs_dt
-        self._transform_and_append(f"dP_obs_dt_{station}", center, offsets, arrays)
-
+        self._transform_and_append(f"dP_dt_{station}", center, offsets, arrays)
         self._transform_and_append(f"regime_state_{station}", center, offsets, arrays)
 
-        # 5. Log Anomaly
+        # Log-anomaly
         self._transform_and_append(f"log_anomaly_{station}", center, offsets, arrays)
         for col in self._get_cols_by_prefix("log_anomaly_ma", station):
             self._transform_and_append(col, center, offsets, arrays)
 
-    def _add_decoder_features(self, station: int, center: int, offsets: np.ndarray, arrays: List[np.ndarray]):
-        """Adiciona features do decoder de forma dinâmica."""
-        need_et = (self.forcings == "P_ET")
+    def _add_decoder_features(
+        self,
+        station: int,
+        center: int,
+        offsets: np.ndarray,
+        arrays: List[np.ndarray],
+    ):
+        """
+        Features do decoder: precipitação unificada (parte histórica = obs, horizonte = forecast).
+        Sem derivadas de fluxo (Q desconhecido no futuro).
+        """
+        need_et = self.forcings == "P_ET"
 
-        # ✅ UNPACKING CONDICIONAL
-        forecast_info = self.forecast_cols[station]
-        if isinstance(forecast_info, tuple):
-            if len(forecast_info) == 2:
-                fc_p_name, fc_e_name = forecast_info
-            elif len(forecast_info) == 1:
-                fc_p_name = forecast_info[0]
-                fc_e_name = None
-            else:
-                raise ValueError(f"forecast_cols[{station}] deve ter 1 ou 2 elementos")
-        else:
-            fc_p_name = forecast_info
-            fc_e_name = None
+        # Precipitação unificada
+        self._transform_and_append(f"precipitation_{station}", center, offsets, arrays)
 
-        self._transform_and_append(fc_p_name, center, offsets, arrays)
+        # ET
+        if need_et:
+            self._transform_and_append(f"et_{station}", center, offsets, arrays)
 
-        if need_et and fc_e_name is not None:
-            self._transform_and_append(fc_e_name, center, offsets, arrays)
-
-        # Médias e Acumulados de Forecast
-        for col in self._get_cols_by_prefix("precipitation_forecast_ma", station):
+        # Médias móveis e acumulados
+        for col in self._get_cols_by_prefix("precipitation_ma", station):
+            self._transform_and_append(col, center, offsets, arrays)
+        for col in self._get_cols_by_prefix("precipitation_cum", station):
             self._transform_and_append(col, center, offsets, arrays)
 
-        for col in self._get_cols_by_prefix("precipitation_forecast_cum", station):
+        # ET médias móveis
+        if need_et:
+            for col in self._get_cols_by_prefix("et_ma", station):
+                self._transform_and_append(col, center, offsets, arrays)
+
+        # API
+        for col in self._get_cols_by_prefix("api_k", station):
             self._transform_and_append(col, center, offsets, arrays)
 
-        # APIs de Forecast
-        for col in self._get_cols_by_prefix("api_forecast_k", station):
-            self._transform_and_append(col, center, offsets, arrays)
+        # dP_dt disponível (série unificada inclui forecast)
+        self._transform_and_append(f"dP_dt_{station}", center, offsets, arrays)
 
-        self._transform_and_append(f"dP_dt_forecast_{station}", center, offsets, arrays)
+        # NÃO incluir: dQ_dt, regime_state, log_anomaly (fluxo desconhecido no futuro)
 
     def _build_temporal_block(self, center: int, stage: str) -> np.ndarray:
-        """Constrói bloco de features temporais."""
         offsets = self.encoder_offsets if stage == "encoder" else self.decoder_offsets
         idxs = center + offsets
         temp_features = []
@@ -365,8 +347,7 @@ class HydroDataset(Dataset):
         return np.stack(temp_features, axis=-1)
 
     def _build_static_vector(self, center: int) -> np.ndarray:
-        """Constrói vetor de features estáticas."""
-        static_feats: List[float] = []
+        static_feats = []
         for station in self.stations:
             attrs = self.static_attrs[station]
             for k in self.static_keys:
@@ -376,7 +357,7 @@ class HydroDataset(Dataset):
         return np.array(static_feats, dtype=np.float32)
 
     def _build_target(self, center: int) -> Tuple[np.ndarray, np.ndarray]:
-        """Constrói alvo e máscara de validade para previsão."""
+        """Constrói alvo e máscara de validade para o horizonte de previsão."""
         future_offsets = self.decoder_offsets[self.decoder_offsets >= 0]
         target = np.zeros((len(future_offsets), len(self.stations)), dtype=np.float32)
         target_mask = np.zeros((len(future_offsets), len(self.stations)), dtype=np.float32)
@@ -385,16 +366,18 @@ class HydroDataset(Dataset):
             scaler = self.flow_scalers[f"Q_{station}"]
             series = self.df[f"Q_{station}"].to_numpy()
             idxs = center + future_offsets
-
             for i, idx in enumerate(idxs):
                 if 0 <= idx < len(series) and not np.isnan(series[idx]):
                     target[i, st_idx] = scaler.transform(
                         torch.tensor(series[idx]).float()
                     ).item()
                     target_mask[i, st_idx] = 1.0
-                # else: mantém 0.0 em target e 0.0 em mask
 
         return target, target_mask
+
+    # ------------------------------------------------------------------
+    # __getitem__
+    # ------------------------------------------------------------------
 
     def __getitem__(self, idx):
         center = self.valid_centers[idx]
@@ -402,36 +385,32 @@ class HydroDataset(Dataset):
         flow_enc, mask_enc = self._build_flow_block(center, "encoder")
         flow_dec, mask_dec = self._build_flow_block(center, "decoder")
 
-        climate_obs_enc, climate_fc_enc = self._build_climate_block(center, "encoder")
-        climate_obs_dec, climate_fc_dec = self._build_climate_block(center, "decoder")
+        climate_enc, _ = self._build_climate_block(center, "encoder")
+        climate_dec, _ = self._build_climate_block(center, "decoder")
 
         temp_enc = self._build_temporal_block(center, "encoder")
         temp_dec = self._build_temporal_block(center, "decoder")
         static_vec = self._build_static_vector(center)
-        
-        target, target_mask = self._build_target(center)  # ← agora retorna dois valores
+        target, target_mask = self._build_target(center)
 
-        encoder_dyn = np.stack(flow_enc + climate_obs_enc, axis=-1)
-        decoder_dyn = np.stack(flow_dec + climate_fc_dec, axis=-1)
+        encoder_dyn = np.stack(flow_enc + climate_enc, axis=-1)
+        decoder_dyn = np.stack(flow_dec + climate_dec, axis=-1)
 
-        mask_enc = np.stack(mask_enc, axis=-1)
-        mask_dec_history = np.stack(mask_dec, axis=-1)  # shape: (decoder_length, 6)
+        mask_enc_arr = np.stack(mask_enc, axis=-1)
+        mask_dec_history = np.stack(mask_dec, axis=-1)  # (decoder_length, n_flow_cols)
 
-        # Expandir target_mask de (horizon, 3) para (horizon, 6)
-        # _build_flow_block gera uma coluna por spec por estação
-        # a ordem é [st0_spec0, st0_spec1, st1_spec0, st1_spec1, ...]
-        # então np.repeat replica cada estação para cobrir suas specs
-        n_flow_cols = mask_dec_history.shape[1]      # 6
-        n_stations_cols = target_mask.shape[1]        # 3
-        reps = n_flow_cols // n_stations_cols         # 2 specs por estação
-
-        target_mask_expanded = np.repeat(target_mask, reps, axis=1)  # (horizon, 6)
+        # Expandir target_mask para ter o mesmo número de colunas que mask_dec_history
+        n_flow_cols = mask_dec_history.shape[1]
+        n_stations  = target_mask.shape[1]
+        reps = n_flow_cols // n_stations
+        target_mask_expanded = np.repeat(target_mask, reps, axis=1)
 
         full_mask_dec = np.concatenate([
-            mask_dec_history[:self.decoder_history, :],  # (decoder_history, 6)
-            target_mask_expanded,                         # (decoder_horizon, 6)
-        ], axis=0)  # (decoder_length, 6) ✅
+            mask_dec_history[:self.decoder_history, :],  # parte histórica
+            target_mask_expanded,                         # horizonte
+        ], axis=0)
 
+        # baseline_last: último valor observado de cada estação (antes do horizonte)
         last_obs = []
         for st in self.stations:
             scaler = self.flow_scalers[f"Q_{st}"]
@@ -440,10 +419,11 @@ class HydroDataset(Dataset):
         last_obs = torch.tensor(last_obs, dtype=torch.float32)
 
         forecast_start_idx = center + self.decoder_offsets[self.decoder_history]
-        if 0 <= forecast_start_idx < len(self.df):
-            forecast_date = self.df.index[forecast_start_idx]
-        else:
-            forecast_date = None
+        forecast_date = (
+            self.df.index[forecast_start_idx]
+            if 0 <= forecast_start_idx < len(self.df)
+            else None
+        )
 
         return Sample(
             encoder_dyn=torch.tensor(encoder_dyn, dtype=torch.float32),
@@ -452,7 +432,7 @@ class HydroDataset(Dataset):
             temporal_enc=torch.tensor(temp_enc, dtype=torch.float32),
             temporal_dec=torch.tensor(temp_dec, dtype=torch.float32),
             target=torch.tensor(target, dtype=torch.float32),
-            mask_enc=torch.tensor(mask_enc, dtype=torch.float32),
+            mask_enc=torch.tensor(mask_enc_arr, dtype=torch.float32),
             mask_dec=torch.tensor(full_mask_dec, dtype=torch.float32),
             baseline_last=last_obs,
             forecast_date=forecast_date,
@@ -460,98 +440,69 @@ class HydroDataset(Dataset):
         )
 
 
+# ==============================================================================
+# Funções de criação de dataset
+# ==============================================================================
+
 def create_temporal_split_with_gap(
     dataset: HydroDataset,
     train_ratio: float = 0.95,
     val_ratio: float = 0.025,
     test_ratio: float = 0.025,
     gap: Optional[int] = None,
-    exclude_reserved: bool = True
+    exclude_reserved: bool = True,
 ) -> Tuple[Subset, Subset, Subset]:
-    """
-    Cria split temporal com gap considerando train, val e test ratios.
-
-    Args:
-        dataset: Dataset hidrológico
-        train_ratio: Proporção para treino (ex: 0.95 = 95%)
-        val_ratio: Proporção para validação (ex: 0.025 = 2.5%)
-        test_ratio: Proporção para teste (ex: 0.025 = 2.5%)
-        gap: Gap (em dias) entre treino e validação
-        exclude_reserved: Se True, não inclui dias reservados no split
-    
-    Returns:
-        Tuple de (train_subset, val_subset, test_subset)
-    
-    Raises:
-        ValueError: Se as proporções não somarem 1.0
-    """
-    # Validar que as proporções somam 1.0
+    """Cria split temporal com gap entre treino e validação."""
     total_ratio = train_ratio + val_ratio + test_ratio
     if not np.isclose(total_ratio, 1.0, rtol=1e-5):
         raise ValueError(
-            f"As proporções devem somar 1.0. "
-            f"train_ratio={train_ratio}, val_ratio={val_ratio}, "
-            f"test_ratio={test_ratio} -> total={total_ratio}"
+            f"Proporções devem somar 1.0. "
+            f"train={train_ratio}, val={val_ratio}, test={test_ratio} → {total_ratio}"
         )
-    
-    n = len(dataset)  # Já considera reserve_last_days
-    
-    # Calcular tamanhos dos splits
-    train_end_idx = int(n * train_ratio)
-    val_start_idx = int(n * (train_ratio + val_ratio))
-    
-    # Garantir que os índices são válidos
-    train_end_idx = min(max(train_end_idx, 1), n - 1)
-    val_start_idx = min(max(val_start_idx, train_end_idx + 1), n)
-    
-    # Calcular gap mínimo baseado no encoder/decoder
+
+    n = len(dataset)
+    train_end_idx = min(max(int(n * train_ratio), 1), n - 1)
+    val_start_idx = min(max(int(n * (train_ratio + val_ratio)), train_end_idx + 1), n)
+
     enc_min = int(dataset.encoder_offsets[0])
     dec_max = int(dataset.decoder_offsets[-1])
-    min_gap_centers = dec_max - enc_min + 1
-    
-    eff_gap = min_gap_centers if gap is None else max(gap, min_gap_centers)
-    
-    # Ajustar val_start para incluir o gap
+    min_gap = dec_max - enc_min + 1
+    eff_gap = min_gap if gap is None else max(gap, min_gap)
+
     val_start_with_gap = min(train_end_idx + eff_gap, n)
-    
-    # Criar os índices
     train_indices = list(range(0, train_end_idx))
-    
-    # Validação começa após o gap (se houver espaço)
-    if val_start_with_gap < val_start_idx:
-        val_indices = list(range(val_start_with_gap, val_start_idx))
-    else:
-        # Se não há espaço para gap, usa o que sobrar
-        val_indices = list(range(train_end_idx, val_start_idx))
-    
-    # Teste é sempre o último conjunto
+
+    val_indices = (
+        list(range(val_start_with_gap, val_start_idx))
+        if val_start_with_gap < val_start_idx
+        else list(range(train_end_idx, val_start_idx))
+    )
     test_indices = list(range(val_start_idx, n))
-    
-    # Fallback: se algum conjunto ficou vazio, redistribuir
+
     if len(val_indices) == 0:
         if len(test_indices) > 1:
-            split_point = len(test_indices) // 2
-            val_indices = test_indices[:split_point]
-            test_indices = test_indices[split_point:]
+            split = len(test_indices) // 2
+            val_indices = test_indices[:split]
+            test_indices = test_indices[split:]
         else:
             val_indices = list(range(train_end_idx, n))
             test_indices = []
-    
+
     if len(test_indices) == 0:
         test_indices = [n - 1] if n > 1 else []
-    
+
     return (
         Subset(dataset, train_indices),
         Subset(dataset, val_indices),
-        Subset(dataset, test_indices)
+        Subset(dataset, test_indices),
     )
+
 
 def create_dataset_for_training_validation(
     df: pd.DataFrame,
     stations: List[int],
     static_attrs: Dict[int, Dict[str, float]],
     train_indices: np.ndarray,
-    forecast_cols: Dict[int, Tuple[str, str]],
     flow_window_config: Dict,
     climate_window_config: Dict,
     temporal_features: List[str],
@@ -560,134 +511,55 @@ def create_dataset_for_training_validation(
     horizon: int = 18,
     use_last_days_as_forecast: bool = True,
     window_stride: int = 1,
-    forcings: str = "P"
+    forcings: str = "P",
+    # Parâmetro legado
+    forecast_cols: Optional[Dict] = None,
 ) -> HydroDataset:
-    """
-    Cria dataset apropriado para treino ou produção.
-
-    Args:
-        df: DataFrame com features processadas
-        stations: Lista de IDs das estações
-        static_attrs: Dicionário de atributos estáticos
-        train_indices: Índices do conjunto de treino para calcular scalers
-        forecast_cols: Mapeamento de colunas de forecast por estação
-        flow_window_config: Configuração de janelas de vazão
-        climate_window_config: Configuração de janelas climáticas
-        temporal_features: Lista de features temporais
-        api_k_list: Lista de valores k para API
-        static_keys: Chaves dos atributos estáticos
-        horizon: Horizonte de previsão em dias
-        use_last_days_as_forecast: Se True, reserva últimos 'horizon' dias
-                                    para simular forecast durante treino
-        window_stride: Passo entre janelas deslizantes
-
-    Returns:
-        HydroDataset configurado
-
-    Examples:
-        # Para treino (reservar últimos 18 dias como "forecast")
-         dataset_train = create_dataset_for_training_validation(
-             df=combined_df,
-             stations=[10100000, 13150000, 14100000],
-             #  outros parâmetros
-             horizon=18,
-             use_last_days_as_forecast=True
-         )
-
-        # Para produção (usar todos os dados)
-         dataset_prod = create_dataset_for_training_validation(
-             df=combined_df,
-             stations=[10100000, 13150000, 14100000],
-             #  outros parâmetros
-             horizon=18,
-             use_last_days_as_forecast=False
-         )
-    """
-    reserve_days = horizon if use_last_days_as_forecast else 0
-
+    """Cria dataset para treino/validação/teste."""
     return HydroDataset(
         df=df,
         stations=stations,
         static_attrs=static_attrs,
         train_indices=train_indices,
-        forecast_cols=forecast_cols,
         flow_window_config=flow_window_config,
         climate_window_config=climate_window_config,
         temporal_features=temporal_features,
         api_k_list=api_k_list,
         static_keys=static_keys,
         window_stride=window_stride,
-        reserve_last_days=reserve_days,
-        forcings=forcings
+        reserve_last_days=horizon if use_last_days_as_forecast else 0,
+        forcings=forcings,
+        forecast_cols=forecast_cols,  # ignorado internamente
     )
+
 
 def create_dataset_for_inference(
     df: pd.DataFrame,
     stations: List[int],
     static_attrs: Dict[int, Dict[str, float]],
-    forecast_cols: Dict[int, Tuple[str, str]],
     flow_window_config: Dict,
     climate_window_config: Dict,
     temporal_features: List[str],
     api_k_list: List[float],
     static_keys: List[str],
+    meta: dict,
     reference_dates: Optional[List[pd.Timestamp]] = None,
     forcings: str = "P",
-    meta: dict = None
+    # Parâmetro legado
+    forecast_cols: Optional[Dict] = None,
 ) -> HydroDataset:
     """
-    Cria dataset para inferência em produção.
-
-    Diferença para `create_dataset_for_training`:
-    - Não faz sliding window em todos os dados
-    - Cria janelas APENAS para datas de referência específicas
-    - Usa TODOS os dados disponíveis (sem reserva)
-    - Se reference_dates=None, usa apenas a última data válida
+    Cria dataset para inferência operacional.
 
     Args:
-        df: DataFrame com features processadas
-        stations: Lista de IDs das estações
-        static_attrs: Dicionário de atributos estáticos
-        forecast_cols: Mapeamento de colunas de forecast por estação
-        flow_window_config: Configuração de janelas de vazão
-        climate_window_config: Configuração de janelas climáticas
-        temporal_features: Lista de features temporais
-        api_k_list: Lista de valores k para API
-        static_keys: Chaves dos atributos estáticos
-        reference_dates: Lista com o ÚLTIMO DIA OBSERVADO para cada janela de inferência.
-                        Aceita strings ('2026-03-16'), Timestamps ou lista mista.
-                        Se None, usa apenas a última data válida do dataset.
-
-    Returns:
-        HydroDataset configurado para inferência
-
-    Examples:
-        # Inferência para a última data disponível
-         ds_inference = create_dataset_for_inference(
-             df=combined_df,
-             stations=[10100000, 13150000, 14100000],
-             #  outros parâmetros
-         )
-         print(len(ds_inference))  # 1 janela
-
-        # Inferência para múltiplas datas específicas (último dia observado de cada janela)
-         ds_inference = create_dataset_for_inference(
-             df=combined_df,
-             #  outros parâmetros
-             reference_dates=['2026-03-16', '2026-03-17']
-         )
-         print(len(ds_inference))  # 2 janelas
+        meta: Dicionário com scalers do treino (obrigatório).
+              Deve conter: 'flow_scalers', 'climate_scalers', 'static_scalers'.
     """
-    # Criar dataset base SEM sliding window
-    # Usamos train_indices dummy (primeiro índice válido)
-    train_indices = np.array([0])
-
     dataset = HydroDataset(
         df=df,
         stations=stations,
         static_attrs=static_attrs,
-        train_indices=np.array([0]),
-        forecast_cols=forecast_cols,
+        train_indices=np.array([0]),  # dummy — será substituído pelos scalers do meta
         flow_window_config=flow_window_config,
         climate_window_config=climate_window_config,
         temporal_features=temporal_features,
@@ -695,85 +567,62 @@ def create_dataset_for_inference(
         static_keys=static_keys,
         window_stride=1,
         reserve_last_days=0,
-        forcings=forcings
+        forcings=forcings,
+        forecast_cols=forecast_cols,  # ignorado
     )
 
-    # Injetar scalers do treino imediatamente, antes de qualquer acesso
-    if meta is not None:
-        dataset.flow_scalers = meta["flow_scalers"]
-        dataset.climate_scalers = meta["climate_scalers"]
-        dataset.static_scalers = meta["static_scalers"]
-        
-        # Copiar dP_obs → dP_forecast
-        for station in stations:
-            obs_key = f'dP_obs_dt_{station}'
-            fc_key  = f'dP_forecast_dt_{station}'
-            if obs_key in dataset.climate_scalers:
-                dataset.climate_scalers[fc_key] = dataset.climate_scalers[obs_key]
-    else:
-        raise ValueError("meta é obrigatório para inferência — scalers do treino são necessários")
-    
-    # Se não especificou datas, usar apenas a última válida
+    # Injetar scalers do treino (sobrescreve os dummy)
+    dataset.flow_scalers    = meta["flow_scalers"]
+    dataset.climate_scalers = meta["climate_scalers"]
+    dataset.static_scalers  = meta["static_scalers"]
+
+    # Configurar janelas válidas
     if reference_dates is None:
-        if len(dataset.valid_centers) > 0:
-            last_center = dataset.valid_centers[-1]
-            dataset.valid_centers = [last_center]
-
-            forecast_start_idx = last_center + dataset.decoder_offsets[dataset.decoder_history]
-            if 0 <= forecast_start_idx < len(df):
-                forecast_date = df.index[forecast_start_idx]
-                print(f"📅 Inferência configurada para data de referência: {forecast_date.date()}")
-                print("(Último dado observado disponível para encoder)")
-        else:
-            raise ValueError("Nenhum center válido encontrado no dataset")
-
+        if len(dataset.valid_centers) == 0:
+            raise ValueError("Nenhum center válido encontrado no dataset.")
+        last_center = dataset.valid_centers[-1]
+        dataset.valid_centers = [last_center]
+        forecast_start_idx = last_center + dataset.decoder_offsets[dataset.decoder_history]
+        if 0 <= forecast_start_idx < len(df):
+            print(f"📅 Inferência: {df.index[forecast_start_idx].date()}")
     else:
         if not isinstance(df.index, pd.DatetimeIndex):
-            raise ValueError("DataFrame deve ter índice DatetimeIndex para usar reference_dates")
+            raise ValueError("DataFrame deve ter índice DatetimeIndex.")
 
-        # Garantir que reference_dates são pd.Timestamp (aceita strings, Timestamps, etc.)
         reference_dates = pd.to_datetime(reference_dates)
-
-        enc_min_offset = int(dataset.encoder_offsets[0])    # normalmente -30
-        enc_max_offset = int(dataset.encoder_offsets[-1])   # normalmente -1
-        dec_max_offset = int(dataset.decoder_offsets[-1])   # normalmente +14
-
+        enc_min_offset = int(dataset.encoder_offsets[0])
+        enc_max_offset = int(dataset.encoder_offsets[-1])
+        flow_cols = [f"Q_{st}" for st in stations]
         custom_centers = []
 
         for ref_date in reference_dates:
-            # Encontrar índice da data no DataFrame
             try:
                 date_idx = df.index.get_loc(ref_date)
             except KeyError:
-                print(f"⚠️  Data {ref_date.date()} não encontrada no DataFrame, pulando")
+                print(f"⚠️  Data {ref_date.date()} não encontrada, pulando.")
                 continue
 
-            # ref_date é o ÚLTIMO DIA OBSERVADO = posição (center + enc_max_offset)
-            # logo: center = date_idx - enc_max_offset
-            # ex: enc_max_offset = -1  →  center = date_idx + 1  (primeiro dia do forecast)
             center = date_idx - enc_max_offset
 
-            # Para inferência, só exigimos que o trecho do ENCODER esteja dentro dos bounds.
-            # O trecho do decoder pode ultrapassar o fim do df (dados futuros com NaN é esperado).
             if center + enc_min_offset >= 0 and center + enc_max_offset < len(df):
-                # Verificar NaN apenas no trecho do encoder (passado observado).
-                # O trecho do decoder terá NaN por design (dados futuros não existem).
-                flow_cols = [f"Q_{st}" for st in stations]
-                encoder_slice = df.iloc[center + enc_min_offset:center + enc_max_offset + 1][flow_cols]
-
-                if not encoder_slice.isna().any().any():
+                enc_slice = df.iloc[
+                    center + enc_min_offset: center + enc_max_offset + 1
+                ][flow_cols]
+                if not enc_slice.isna().any().any():
                     custom_centers.append(center)
-                    print(f"✅ Data {ref_date.date()} adicionada (center={center}, forecast a partir de {df.index[center].date()})")
+                    print(
+                        f"✅ {ref_date.date()} adicionada "
+                        f"(forecast a partir de {df.index[center].date()})"
+                    )
                 else:
-                    print(f"⚠️  Data {ref_date.date()} tem NaN na janela do encoder, pulando")
+                    print(f"⚠️  {ref_date.date()}: NaN no encoder, pulando.")
             else:
-                print(f"⚠️  Data {ref_date.date()} não tem dados suficientes no encoder, pulando")
-                print(f"   (center={center}, enc_min={enc_min_offset}, enc_max={enc_max_offset}, len(df)={len(df)})")
+                print(f"⚠️  {ref_date.date()}: dados insuficientes no encoder, pulando.")
 
         if len(custom_centers) == 0:
-            raise ValueError("Nenhuma data válida encontrada para inferência")
+            raise ValueError("Nenhuma data válida para inferência.")
 
         dataset.valid_centers = custom_centers
-        print(f"\n📊 Dataset de inferência criado com {len(custom_centers)} janela(s)")
+        print(f"\n📊 Dataset de inferência: {len(custom_centers)} janela(s)")
 
     return dataset
