@@ -1,5 +1,5 @@
 data:
-  experiment_name: no_loss_direction
+  experiment_name: adjustment_training_losses
   stations:
   - 10100000
   - 13150000
@@ -146,9 +146,9 @@ data:
   reference_dates:
   - '2026-03-16'
   split_config:
-    train_ratio: 0.95
-    val_ratio: 0.025
-    test_ratio: 0.025
+    train_ratio: 0.85
+    val_ratio: 0.1
+    test_ratio: 0.05
     gap: 128
     window_stride: 1
 model:
@@ -162,7 +162,7 @@ model:
   gate:
     y_prev: true
     from_inputs: true
-    clamp_by_ceiling: true
+    clamp_by_ceiling: false
     ceiling_min: 0.15
     detach_y_prev: true
     min: 0.1
@@ -186,7 +186,7 @@ training:
     initial: 0.6
     decay: 0.94
     final: 0.0
-    free_run_tail: 0
+    free_run_tail: 8
     early_free_run_patience: null
   loss_weights:
     smooth: 0.001
@@ -203,7 +203,7 @@ training:
     weight_gamma: 0.05
   gate_decay: 0.06
   early_stopping:
-    patience: 10
+    patience: 20
     min_delta: 0.0001
   scheduler:
     patience: 6

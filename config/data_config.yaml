@@ -1,7 +1,7 @@
 # ==========================================================
 # NOMENCLATURA DESCRITIVA DO EXPERIMENTO 
 # ==========================================================
-experiment_name: no_loss_direction
+experiment_name: adjustment_training_losses
 
 # ==========================================================
 # CONFIGURAÇÕES DE ESTAÇÕES E ATRIBUTOS ESTÁTICOS
@@ -72,8 +72,8 @@ forecast_cum: [3, 5, 7, 10]
 reference_dates: ['2026-03-16']
 
 split_config:
-  train_ratio: 0.95
-  val_ratio: 0.025
-  test_ratio: 0.025
+  train_ratio: 0.85
+  val_ratio: 0.10
+  test_ratio: 0.05
   gap: 128
   window_stride: 1

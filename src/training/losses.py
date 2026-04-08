@@ -4,7 +4,7 @@ Funções de loss para treino do modelo hidrológico.
 
 import torch
 import torch.nn.functional as F
-from typing import Optional, Tuple
+from typing import Optional
 
 
 def multi_step_loss(
@@ -20,6 +20,7 @@ def multi_step_loss(
     g_seq: Optional[torch.Tensor] = None,
     lambda_gate_bias: float = 0.01,
     gate_decay: float = 0.12,
+    gate_target: float = 0.30,
     lambda_direction: float = 0.02,
     direction_start: int = 5,
     dir_weight_gamma: float = 0.05,
@@ -97,13 +98,13 @@ def multi_step_loss(
         dir_term = F.relu(-(dp * dt)) / (torch.abs(dt) + eps)
         t_idx2 = torch.arange(dp.size(1), device=preds.device).view(1, -1, 1)
         w_dir = torch.exp(dir_weight_gamma * t_idx2) * (t_idx2 >= direction_start).float()
-        direction_penalty = (dir_term * m2 * w_dir).sum() / (m2.sum() + eps)
+        #direction_penalty = (dir_term * m2 * w_dir).sum() / (m2.sum() + eps)
     else:
         direction_penalty = preds.new_tensor(0.0)
 
-    # 7. Penalidade do gate
+    # 7. Penalidade do gate — penaliza desvio de gate_target (evita gate travado no mínimo)
     if g_seq is not None:
-        gate_penalty = (g_seq ** 2).mean()  # Queremos gate pequeno (perto de 0)
+        gate_penalty = ((g_seq - gate_target) ** 2).mean()
     else:
         gate_penalty = preds.new_tensor(0.0)
 
