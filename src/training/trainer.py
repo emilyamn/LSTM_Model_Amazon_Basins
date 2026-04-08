@@ -43,7 +43,7 @@ def train_model(
 ) -> torch.nn.Module:
     """
     Treina o modelo Seq2SeqHydro.
-    
+
     Args:
         model: Modelo a ser treinado
         train_loader: DataLoader de treino
@@ -73,7 +73,7 @@ def train_model(
         weight_decay: Decaimento de peso
         clip_grad_norm: Norma máxima para clipping de gradiente
         device: Dispositivo para treino
-        
+
     Returns:
         Modelo treinado
     """
@@ -94,6 +94,7 @@ def train_model(
     best_val = float("inf")
     best_state = None
     no_improve = 0
+    free_run_active = False  # uma vez ativado, não desliga mais
 
     for epoch in range(1, max_epochs + 1):
         # Calcular teacher forcing ratio
@@ -101,11 +102,13 @@ def train_model(
             tf_ratio = final_teacher_forcing
         else:
             tf_ratio = max(
-                final_teacher_forcing, 
+                final_teacher_forcing,
                 initial_teacher_forcing * (teacher_forcing_decay ** (epoch - 1))
             )
-        
+
         if (early_free_run_patience is not None) and (no_improve >= early_free_run_patience):
+            free_run_active = True
+        if free_run_active:
             tf_ratio = 0.0
 
         # Reduzir continuidade com o tempo
@@ -114,30 +117,30 @@ def train_model(
         # Treino
         model.train()
         train_losses = []
-        
+
         for batch in train_loader:
             batch = move_sample_to_device(batch, device)
-            
+
             preds, _, g_seq = model(batch, tf_ratio, decoder_history, decoder_horizon)
-            
+
             loss = multi_step_loss(
-                preds, 
-                batch.target, 
-                batch.baseline_last, 
+                preds,
+                batch.target,
+                batch.baseline_last,
                 weights,
-                lambda_smooth, 
-                lambda_negative, 
+                lambda_smooth,
+                lambda_negative,
                 lambda_cont_epoch,
                 use_huber=False,
-                g_seq=g_seq, 
-                lambda_gate_bias=lambda_gate_bias, 
+                g_seq=g_seq,
+                lambda_gate_bias=lambda_gate_bias,
                 gate_decay=gate_decay,
-                lambda_direction=lambda_direction, 
-                direction_start=direction_start, 
+                lambda_direction=lambda_direction,
+                direction_start=direction_start,
                 dir_weight_gamma=dir_weight_gamma,
                 lambda_slope=lambda_slope
             )
-            
+
             optimizer.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=clip_grad_norm)
@@ -149,26 +152,26 @@ def train_model(
         # Validação
         model.eval()
         val_losses = []
-        
+
         with torch.no_grad():
             for batch in val_loader:
                 batch = move_sample_to_device(batch, device)
                 preds, _, g_seq = model(batch, 0.0, decoder_history, decoder_horizon)
-                
+
                 loss = multi_step_loss(
-                    preds, 
-                    batch.target, 
-                    batch.baseline_last, 
+                    preds,
+                    batch.target,
+                    batch.baseline_last,
                     weights,
-                    lambda_smooth, 
-                    lambda_negative, 
+                    lambda_smooth,
+                    lambda_negative,
                     lambda_cont_epoch,
                     use_huber=False,
-                    g_seq=g_seq, 
-                    lambda_gate_bias=lambda_gate_bias, 
+                    g_seq=g_seq,
+                    lambda_gate_bias=lambda_gate_bias,
                     gate_decay=gate_decay,
-                    lambda_direction=lambda_direction, 
-                    direction_start=direction_start, 
+                    lambda_direction=lambda_direction,
+                    direction_start=direction_start,
                     dir_weight_gamma=dir_weight_gamma,
                     lambda_slope=lambda_slope
                 )
@@ -185,9 +188,9 @@ def train_model(
             no_improve = 0
         else:
             no_improve += 1
-        
+
         print(f"[Epoch {epoch:02d}] train={avg_train:.4f} val={avg_val:.4f} tf={tf_ratio:.3f}")
-        
+
         if no_improve >= patience:
             print("Early stopping.")
             break
@@ -195,7 +198,7 @@ def train_model(
     # Carregar melhor modelo
     if best_state is not None:
         model.load_state_dict(best_state)
-    
+
     return model
 
 
@@ -211,7 +214,7 @@ def predict_autoregressive(
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Optional[np.ndarray], np.ndarray, str]:
     """
     Realiza predições autoregressivas.
-    
+
     Args:
         model: Modelo treinado
         loader: DataLoader para predição
@@ -221,27 +224,27 @@ def predict_autoregressive(
         stations: Lista de IDs das estações
         clamp_non_negative: Forçar valores não negativos
         device: Dispositivo para predição
-        
+
     Returns:
         Tupla com (previsões, observações, baseline, gates, datas, dispositivo)
     """
     preds_all, obs_all = [], []
     baseline_batches, gseq_batches = [], []
     forecast_dates_batches = []
-    
+
     model.eval()
     with torch.no_grad():
         for batch in loader:
             batch_device = move_sample_to_device(batch, device)
             preds, _, g_seq = model(batch_device, 0.0, decoder_history, decoder_horizon)
-            
+
             preds_all.append(preds.cpu().numpy())
             obs_all.append(batch_device.target.cpu().numpy())
             baseline_batches.append(batch_device.baseline_last.cpu().numpy())
-            
+
             if g_seq is not None:
                 gseq_batches.append(g_seq.cpu().numpy())
-            
+
             forecast_dates_batches.append(batch.forecast_date)
 
     # Concatenar todos os batches

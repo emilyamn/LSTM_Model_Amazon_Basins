@@ -1,5 +1,5 @@
 # Parâmetros de treino
-epochs: 30
+epochs: 50
 batch_size: 64
 learning_rate: 0.001
 weight_decay: 0.0001
@@ -7,11 +7,11 @@ clip_grad_norm: 3.0
 
 # Teacher forcing
 teacher_forcing:
-  initial: 0.60
-  decay: 0.94
+  initial: 0.40
+  decay: 0.92
   final: 0.0
-  free_run_tail: 8
-  early_free_run_patience: null
+  free_run_tail: 0
+  early_free_run_patience: 5
 
 # Pesos da loss
 loss_weights:
