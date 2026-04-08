@@ -662,38 +662,33 @@ def save_metrics(
     metrics: Dict[str, Any],
     experiment_name: str,
     filename_base: str = "metrics",
-    base_dir: Optional[Path] = None,
+    base_dir: Optional[str] = None,
     save_json: bool = True,
     save_csv: bool = True,
-) -> Dict[str, Path]:
+) -> Dict[str, str]:
     """
-    Salva métricas em JSON e múltiplos arquivos CSV organizados por tipo de evento.
-
-    Suporta duas estruturas de entrada:
-    1. Estrutura simples: {station: metrics} (métricas gerais por estação)
-    2. Estrutura por evento: {event_type: {station: metrics}} (métricas por tipo de evento)
-
-    Args:
-        metrics: Dicionário de métricas
-        experiment_name: Nome do experimento
-        filename_base: Nome base dos arquivos (sem extensão)
-        base_dir: Diretório base dos experimentos (opcional)
-        save_json: Se True, salva JSON completo (padrão: True)
-        save_csv: Se True, salva CSVs organizados (padrão: True)
-
-    Returns:
-        Dicionário com paths dos arquivos salvos
+    Salva métricas em JSON e 2 arquivos CSV:
+    
+    1. overall.csv - Overall + Macro + Per_horizon para TODOS OS EVENTOS (agregado)
+    2. by_event.csv - Overall + Macro + Per_horizon POR CADA EVENTO
     """
-    exp_path = get_experiment_path(experiment_name, base_dir)
+    try:
+        from src.utils.experiment_utils import get_experiment_path
+        exp_path = get_experiment_path(experiment_name)
+    except ImportError:
+        exp_path = Path("outputs/experiments") / experiment_name
+
+    if base_dir is not None:
+        exp_path = Path(base_dir) / experiment_name
+
     metrics_dir = exp_path / "predictions_test" / "metrics"
     metrics_dir.mkdir(parents=True, exist_ok=True)
 
     saved_paths = {}
 
-    # Detectar estrutura das métricas
-    first_key = next(iter(metrics.keys()), None)
+    first_key = next(iter(metrics.keys())), None
     is_event_based = first_key in ['extreme', 'moderate', 'normal', 'extreme_high',
-                                    'extreme_low', 'moderate_high', 'moderate_low']
+                                    'extreme_low', 'moderate_high', 'moderate_low', 'all']
 
     if is_event_based:
         event_types = list(metrics.keys())
@@ -701,143 +696,169 @@ def save_metrics(
         event_types = ['overall']
         metrics = {'overall': metrics}
 
-    # Salvar JSON completo
+    # ======== JSON COMPLETO ========
     if save_json:
         json_path = metrics_dir / f"{filename_base}.json"
         with open(json_path, 'w', encoding='utf-8') as f:
-            json.dump(metrics, f, indent=2)
-        saved_paths["json"] = json_path
-        print(f"💾 Métricas salvas (JSON): {exp_path.relative_to(get_experiments_base_dir().parent)}/predictions_test/metrics/{filename_base}.json")
+            json.dump(metrics, f, indent=2, default=str)
+        saved_paths["json"] = str(json_path)
+        print(f"💾 Métricas salvas (JSON): {json_path}")
 
-    # Salvar CSVs
+    # ======== CSVs - apenas 2 arquivos ========
     if save_csv:
-        # Overall por evento
-        rows_overall = []
-        for event_type in event_types:
-            if event_type not in metrics:
+        # ========== 1. OVERALL.CSV - Agregado de todos os eventos ==========
+        rows_all = []
+        
+        for event_label in event_types:
+            if event_label not in metrics:
                 continue
-            station_metrics = metrics[event_type]
+            station_metrics = metrics[event_label]
 
             for station, m in station_metrics.items():
-                if not isinstance(m, dict) or 'overall' not in m:
+                if not isinstance(m, dict):
                     continue
-                overall = m['overall']
-                row = {
-                    'event_type': event_type,
-                    'station': station,
-                    'rmse': overall.get('rmse'),
-                    'mae': overall.get('mae'),
-                    'mape': overall.get('mape'),
-                    'r2': overall.get('r2'),
-                    'nse': overall.get('nse'),
-                    'kge': overall.get('kge'),
-                    'skill_rmse': overall.get('skill_rmse'),
-                    'n_windows': m.get('n_windows'),
-                }
-                rows_overall.append(row)
 
-        if rows_overall:
-            df_overall = pd.DataFrame(rows_overall)
+                # Overall
+                if 'overall' in m:
+                    overall = m['overall']
+                    row = {
+                        'event_type': event_label,
+                        'station': station,
+                        'metric_level': 'overall',
+                        'rmse': overall.get('rmse'),
+                        'mae': overall.get('mae'),
+                        'mape': overall.get('mape'),
+                        'r2': overall.get('r2'),
+                        'nse': overall.get('nse'),
+                        'kge': overall.get('kge'),
+                        'skill_rmse': overall.get('skill_rmse'),
+                        'n_windows': m.get('n_windows'),
+                    }
+                    rows_all.append(row)
+
+                # Macro
+                if 'macro' in m:
+                    macro = m['macro']
+                    row = {
+                        'event_type': event_label,
+                        'station': station,
+                        'metric_level': 'macro',
+                        'rmse': macro.get('rmse'),
+                        'mae': macro.get('mae'),
+                        'mape': macro.get('mape'),
+                        'r2': macro.get('r2'),
+                        'nse': macro.get('nse'),
+                        'kge': None,
+                        'skill_rmse': None,
+                        'n_windows': m.get('n_windows'),
+                    }
+                    rows_all.append(row)
+
+                # Per horizon
+                if 'per_horizon' in m:
+                    per_horizon = m['per_horizon']
+                    if isinstance(per_horizon, dict):
+                        n_horizons = len(per_horizon.get('rmse', []))
+                        for h in range(n_horizons):
+                            row = {
+                                'event_type': event_label,
+                                'station': station,
+                                'metric_level': f'horizon_{h+1}',
+                                'rmse': per_horizon.get('rmse', [None])[h],
+                                'mae': per_horizon.get('mae', [None])[h],
+                                'mape': per_horizon.get('mape', [None])[h],
+                                'r2': per_horizon.get('r2', [None])[h],
+                                'nse': per_horizon.get('nse', [None])[h],
+                                'kge': None,
+                                'skill_rmse': None,
+                                'n_windows': m.get('n_windows'),
+                            }
+                            rows_all.append(row)
+
+        if rows_all:
+            df_all = pd.DataFrame(rows_all)
             csv_overall_path = metrics_dir / f"{filename_base}_overall.csv"
-            df_overall.to_csv(csv_overall_path, index=False, sep=';')
-            saved_paths["csv_overall"] = csv_overall_path
+            df_all.to_csv(csv_overall_path, index=False, sep='\t')
+            saved_paths["csv_overall"] = str(csv_overall_path)
             print(f"💾 Métricas salvas (CSV Overall): {csv_overall_path}")
 
-        # Macro por evento
-        rows_macro = []
-        for event_type in event_types:
-            if event_type not in metrics:
+        # ========== 2. BY_EVENT.CSV - Separado por evento ==========
+        rows_by_event = []
+        
+        for event_label in event_types:
+            if event_label not in metrics:
                 continue
-            station_metrics = metrics[event_type]
+            station_metrics = metrics[event_label]
 
             for station, m in station_metrics.items():
-                if not isinstance(m, dict) or 'macro' not in m:
+                if not isinstance(m, dict):
                     continue
-                macro = m['macro']
-                row = {
-                    'event_type': event_type,
-                    'station': station,
-                    'rmse': macro.get('rmse'),
-                    'mae': macro.get('mae'),
-                    'mape': macro.get('mape'),
-                    'r2': macro.get('r2'),
-                    'nse': macro.get('nse'),
-                    'n_windows': m.get('n_windows'),
-                }
-                rows_macro.append(row)
 
-        if rows_macro:
-            df_macro = pd.DataFrame(rows_macro)
-            csv_macro_path = metrics_dir / f"{filename_base}_macro.csv"
-            df_macro.to_csv(csv_macro_path, index=False, sep=';')
-            saved_paths["csv_macro"] = csv_macro_path
-            print(f"💾 Métricas salvas (CSV Macro): {csv_macro_path}")
+                # Overall
+                if 'overall' in m:
+                    overall = m['overall']
+                    row = {
+                        'event_type': event_label,
+                        'station': station,
+                        'metric_level': 'overall',
+                        'rmse': overall.get('rmse'),
+                        'mae': overall.get('mae'),
+                        'mape': overall.get('mape'),
+                        'r2': overall.get('r2'),
+                        'nse': overall.get('nse'),
+                        'kge': overall.get('kge'),
+                        'skill_rmse': overall.get('skill_rmse'),
+                        'n_windows': m.get('n_windows'),
+                    }
+                    rows_by_event.append(row)
 
-        # Per horizon por evento
-        rows_per_horizon = []
-        for event_type in event_types:
-            if event_type not in metrics:
-                continue
-            station_metrics = metrics[event_type]
+                # Macro
+                if 'macro' in m:
+                    macro = m['macro']
+                    row = {
+                        'event_type': event_label,
+                        'station': station,
+                        'metric_level': 'macro',
+                        'rmse': macro.get('rmse'),
+                        'mae': macro.get('mae'),
+                        'mape': macro.get('mape'),
+                        'r2': macro.get('r2'),
+                        'nse': macro.get('nse'),
+                        'kge': None,
+                        'skill_rmse': None,
+                        'n_windows': m.get('n_windows'),
+                    }
+                    rows_by_event.append(row)
 
-            for station, m in station_metrics.items():
-                if not isinstance(m, dict) or 'per_horizon' not in m:
-                    continue
-                per_horizon = m['per_horizon']
+                # Per horizon
+                if 'per_horizon' in m:
+                    per_horizon = m['per_horizon']
+                    if isinstance(per_horizon, dict):
+                        n_horizons = len(per_horizon.get('rmse', []))
+                        for h in range(n_horizons):
+                            row = {
+                                'event_type': event_label,
+                                'station': station,
+                                'metric_level': f'horizon_{h+1}',
+                                'rmse': per_horizon.get('rmse', [None])[h],
+                                'mae': per_horizon.get('mae', [None])[h],
+                                'mape': per_horizon.get('mape', [None])[h],
+                                'r2': per_horizon.get('r2', [None])[h],
+                                'nse': per_horizon.get('nse', [None])[h],
+                                'kge': None,
+                                'skill_rmse': None,
+                                'n_windows': m.get('n_windows'),
+                            }
+                            rows_by_event.append(row)
 
-                if isinstance(per_horizon, dict):
-                    horizons = range(1, len(per_horizon.get('rmse', [])) + 1)
-                    for h_idx, h in enumerate(horizons):
-                        row = {
-                            'event_type': event_type,
-                            'station': station,
-                            'horizon': h,
-                            'rmse': per_horizon.get('rmse', [None])[h_idx],
-                            'mae': per_horizon.get('mae', [None])[h_idx],
-                            'mape': per_horizon.get('mape', [None])[h_idx],
-                            'r2': per_horizon.get('r2', [None])[h_idx],
-                            'nse': per_horizon.get('nse', [None])[h_idx],
-                        }
-                        rows_per_horizon.append(row)
-
-        if rows_per_horizon:
-            df_per_horizon = pd.DataFrame(rows_per_horizon)
-            csv_per_horizon_path = metrics_dir / f"{filename_base}_per_horizon.csv"
-            df_per_horizon.to_csv(csv_per_horizon_path, index=False, sep=';')
-            saved_paths["csv_per_horizon"] = csv_per_horizon_path
-            print(f"💾 Métricas salvas (CSV Per Horizon): {csv_per_horizon_path}")
-
-        # Summary
-        rows_summary = []
-        for event_type in event_types:
-            if event_type not in metrics:
-                continue
-            station_metrics = metrics[event_type]
-
-            total_windows = sum(m.get('n_windows', 0) for m in station_metrics.values() if isinstance(m, dict))
-
-            all_overall = [m['overall'] for m in station_metrics.values() if isinstance(m, dict) and 'overall' in m]
-            if all_overall:
-                row = {
-                    'event_type': event_type,
-                    'n_stations': len(all_overall),
-                    'total_windows': total_windows,
-                    'rmse_mean': np.mean([o.get('rmse') for o in all_overall if o.get('rmse') is not None]),
-                    'rmse_std': np.std([o.get('rmse') for o in all_overall if o.get('rmse') is not None]),
-                    'mae_mean': np.mean([o.get('mae') for o in all_overall if o.get('mae') is not None]),
-                    'nse_mean': np.mean([o.get('nse') for o in all_overall if o.get('nse') is not None]),
-                }
-                rows_summary.append(row)
-
-        if rows_summary:
-            df_summary = pd.DataFrame(rows_summary)
-            csv_summary_path = metrics_dir / f"{filename_base}_summary.csv"
-            df_summary.to_csv(csv_summary_path, index=False, sep=';')
-            saved_paths["csv_summary"] = csv_summary_path
-            print(f"💾 Métricas salvas (CSV Summary): {csv_summary_path}")
+        if rows_by_event:
+            df_by_event = pd.DataFrame(rows_by_event)
+            csv_by_event_path = metrics_dir / f"{filename_base}_by_event.csv"
+            df_by_event.to_csv(csv_by_event_path, index=False, sep='\t')
+            saved_paths["csv_by_event"] = str(csv_by_event_path)
+            print(f"💾 Métricas salvas (CSV By Event): {csv_by_event_path}")
 
     return saved_paths
-
 
 def save_plot(
     fig: plt.Figure,

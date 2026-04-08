@@ -338,6 +338,26 @@ def _generate_features(
         forcings=config.forcings,
     )
 
+    # Restaurar NaN em Q e features derivadas de fluxo após reference_date.
+    # O ffill().bfill() de process_multiple_stations propaga o último valor
+    # observado — precisamos desfazer isso para as colunas que dependem de Q.
+    max_ref_date = pd.to_datetime(config.reference_dates).max()
+    mask_future = df_features.index > max_ref_date
+
+    if mask_future.any():
+        q_derived_prefixes = ("Q_", "dQ_dt_", "regime_state_", "log_anomaly")
+        cols_to_nan = [
+            c for c in df_features.columns
+            if any(c.startswith(p) for p in q_derived_prefixes)
+        ]
+        df_features.loc[mask_future, cols_to_nan] = np.nan
+
+        if verbose:
+            print(
+                f"   🔒 {len(cols_to_nan)} colunas derivadas de Q restauradas "
+                f"para NaN após {max_ref_date.date()}"
+            )
+
     return df_features
 
 
