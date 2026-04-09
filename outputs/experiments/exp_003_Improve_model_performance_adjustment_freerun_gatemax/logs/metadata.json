@@ -1,0 +1,13 @@
+{
+  "exp_id": 4,
+  "branch_name": "Improve_model_performance",
+  "exp_name": "adjustment_freerun_gatemax",
+  "exp_dir": "C:\\Users\\emily\\Documents\\GitHub\\Mini-curso-GitHub-Leo\\outputs\\experiments\\exp_004_Improve_model_performance_adjustment_freerun_gatemax",
+  "created_at": "2026-04-08 08:49:36",
+  "description": "\u00e9pocas no inicio do treino agora rodam sem teacher forcing e reduzindo gatemax para evitar fallback",
+  "config_files": [
+    "data_config.yaml",
+    "model_config.yaml",
+    "training_config.yaml"
+  ]
+}

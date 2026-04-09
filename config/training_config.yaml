@@ -7,20 +7,20 @@ clip_grad_norm: 3.0
 
 # Teacher forcing
 teacher_forcing:
-  initial: 0.40
-  decay: 0.92
+  initial: 0.25
+  decay: 0.88
   final: 0.0
   free_run_tail: 0
-  early_free_run_patience: 5
+  early_free_run_patience: 3
 
 # Pesos da loss
 loss_weights:
-  smooth: 0.001
+  smooth: 0.0
   negative: 0.01
-  continuity: 0.002
-  slope: 1.0
-  gate_bias: 0.01
-  direction: 0.02
+  continuity: 0.001
+  slope: 0.3
+  gate_bias: 0.05
+  direction: 0.10
 
 # Pesos por horizonte
 horizon_weights:
@@ -29,7 +29,7 @@ horizon_weights:
 
 # Parâmetros de direção
 direction:
-  start: 5
+  start: 0
   weight_gamma: 0.05
 
 # Gate decay

@@ -98,7 +98,7 @@ def multi_step_loss(
         dir_term = F.relu(-(dp * dt)) / (torch.abs(dt) + eps)
         t_idx2 = torch.arange(dp.size(1), device=preds.device).view(1, -1, 1)
         w_dir = torch.exp(dir_weight_gamma * t_idx2) * (t_idx2 >= direction_start).float()
-        #direction_penalty = (dir_term * m2 * w_dir).sum() / (m2.sum() + eps)
+        direction_penalty = (dir_term * m2 * w_dir).sum() / (m2.sum() + eps)
     else:
         direction_penalty = preds.new_tensor(0.0)
 
@@ -116,7 +116,7 @@ def multi_step_loss(
         + lambda_negative * neg_penalty
         + lambda_continuity * continuity_penalty
         + lambda_gate_bias * gate_penalty
-        #+ lambda_direction * direction_penalty
+        + lambda_direction * direction_penalty
     )
     
     return total_loss
