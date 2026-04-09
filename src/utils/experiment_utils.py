@@ -517,14 +517,10 @@ def save_model(
             dataset=dataset,
             model_config={
                 "encoder_input_dim": 66,
-                "decoder_input_dim": 55,
-                "hidden_dim": 128,
                 # ... todos os hiperparâmetros
             },
             training_info={
                 "final_epoch": 50,
-                "best_val_loss": 0.123,
-                "train_loss": 0.098
             }
         )
 

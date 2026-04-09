@@ -2,6 +2,8 @@
 # NOMENCLATURA DESCRITIVA DO EXPERIMENTO 
 # ==========================================================
 experiment_name: adjustment_direction_slope
+description: free runs, ativação da direction penalty e redução do gate_max.
+model_name: model_direction_lowgat
 
 # ==========================================================
 # CONFIGURAÇÕES DE ESTAÇÕES E ATRIBUTOS ESTÁTICOS
