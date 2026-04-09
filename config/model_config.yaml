@@ -15,7 +15,7 @@ gate:
   ceiling_min: 0.15
   detach_y_prev: true
   min: 0.10
-  max: 0.45
+  max: 0.60
 
 # Regularização e dropout
 regularization:

@@ -98,11 +98,13 @@ class Seq2SeqHydro(nn.Module):
             dropout=dropout if num_layers > 1 else 0.0,
         )
         
-        # Decoder LSTM
+        # Decoder LSTM — SEM y_prev no input (forçar aprendizado de clima)
+        # decoder_input_dim inclui n_stations (y_prev), mas o LSTM recebe sem y_prev
+        self.decoder_lstm_dim = decoder_input_dim - n_stations
         self.decoder = nn.LSTM(
-            decoder_input_dim, 
-            hidden_dim, 
-            num_layers=num_layers, 
+            self.decoder_lstm_dim,
+            hidden_dim,
+            num_layers=num_layers,
             batch_first=True,
             dropout=dropout if num_layers > 1 else 0.0,
         )
@@ -120,10 +122,19 @@ class Seq2SeqHydro(nn.Module):
         self.layernorm = nn.LayerNorm(hidden_dim)
         self.static_embed = StaticEmbedding(n_static, hidden_dim * num_layers)
 
-        # Camada de saída
+        # Camada de saída (LSTM pathway)
         self.out_proj = nn.Sequential(
             nn.Linear(hidden_dim, 2 * hidden_dim),
             nn.GLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, n_stations),
+        )
+
+        # Climate skip connection — caminho direto de features climáticas para delta_t
+        climate_feat_dim = decoder_input_dim - n_stations
+        self.climate_proj = nn.Sequential(
+            nn.Linear(climate_feat_dim, hidden_dim),
+            nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(hidden_dim, n_stations),
         )
@@ -192,46 +203,37 @@ class Seq2SeqHydro(nn.Module):
             idx = decoder_history + t
             tf_t = float(teacher_forcing_ratio * math.exp(-self.tf_step_decay * t))
 
-            # Mascaramento de y_prev durante treino
-            if self.training and self.y_prev_mask_p > 0.0:
-                keep_prob = max(0.0, 1.0 - (
-                    self.y_prev_mask_p + 
-                    self.y_prev_mask_step_gamma * (t / max(1, decoder_horizon - 1))
-                ))
-                keep = torch.bernoulli(torch.full((batch_size, 1), keep_prob, device=device))
-                y_prev_masked = y_prev * keep
-            else:
-                y_prev_masked = y_prev
-            
-            y_prev_in = self.y_prev_dropout(y_prev_masked) if self.training else y_prev_masked
+            # Features externas (clima + temporal) — usadas em LSTM, climate_proj e gate
+            ext_features = torch.cat([dec_dyn[:, idx, :], dec_temp[:, idx, :]], dim=-1)
 
-            # Construir entrada do decoder
-            dec_in_t = torch.cat([dec_dyn[:, idx, :], dec_temp[:, idx, :], y_prev_in], dim=-1)
-            dec_in_t = dec_in_t.unsqueeze(1)
-            
+            # Entrada do decoder SEM y_prev (forçar aprendizado de clima)
+            dec_in_t = ext_features.unsqueeze(1)
+
             if self.training:
                 dec_in_t = self.decoder_in_dropout(dec_in_t)
 
-            # Decoder
+            # Decoder LSTM
             dec_out_t, (h, c) = self.decoder(dec_in_t, (h, c))
-            
+
             # Atenção
             if self.attention:
                 attn_out, _ = self.attn_layer(dec_out_t, attn_memory, attn_memory)
                 dec_out_t = dec_out_t + attn_out
-            
+
             dec_out_t = self.layernorm(dec_out_t.squeeze(1))
 
-            # Previsão base
-            delta_t = self.out_proj(dec_out_t)
+            # Previsão base: LSTM pathway + climate skip connection
+            delta_lstm = self.out_proj(dec_out_t)
+            delta_climate = self.climate_proj(ext_features)
+            delta_t = delta_lstm + delta_climate
             base_pred = y_prev + delta_t if self.residual else delta_t
 
             # Gate mechanism
             if self.gate_y_prev:
-                gate_inputs = torch.cat([dec_dyn[:, idx, :], dec_temp[:, idx, :]], dim=-1)
+                gate_inputs = ext_features
                 if self.detach_y_prev_in_gate:
                     gate_inputs = gate_inputs.detach()
-                
+
                 g_raw = torch.sigmoid(self.gate_mlp(gate_inputs))
 
                 # Clamping do gate
