@@ -1,0 +1,13 @@
+{
+  "exp_id": 8,
+  "branch_name": "Improve_model_performance",
+  "exp_name": "anchored_high_direction",
+  "exp_dir": "C:\\Users\\emily\\Documents\\GitHub\\Mini-curso-GitHub-Leo\\outputs\\experiments\\exp_008_Improve_model_performance_anchored_high_direction",
+  "created_at": "2026-04-10 08:56:18",
+  "description": "Sem climate_proj (cancelava LSTM). lambda_direction=1.0 forca modelo a acertar direcao de variacao. Previsao ancorada ao baseline.",
+  "config_files": [
+    "data_config.yaml",
+    "model_config.yaml",
+    "training_config.yaml"
+  ]
+}
