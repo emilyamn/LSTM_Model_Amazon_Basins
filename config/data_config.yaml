@@ -1,9 +1,9 @@
 # ==========================================================
 # NOMENCLATURA DESCRITIVA DO EXPERIMENTO 
 # ==========================================================
-experiment_name: anchored_high_direction
-description: Sem climate_proj (cancelava LSTM). lambda_direction=1.0 forca modelo a acertar direcao de variacao. Previsao ancorada ao baseline.
-model_name: model_anchored_highdir
+experiment_name: autoregressive_climate_skip_gate
+description: Volta ao autoregressive com climate_proj e gate. y_prev fora do LSTM. direction=0.3, gate_bias=0.05.
+model_name: model_autoreg_climateskip
 
 # ==========================================================
 # CONFIGURAÇÕES DE ESTAÇÕES E ATRIBUTOS ESTÁTICOS

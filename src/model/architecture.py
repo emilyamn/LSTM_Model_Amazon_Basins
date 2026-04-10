@@ -122,10 +122,19 @@ class Seq2SeqHydro(nn.Module):
         self.layernorm = nn.LayerNorm(hidden_dim)
         self.static_embed = StaticEmbedding(n_static, hidden_dim * num_layers)
 
-        # Camada de saída
+        # Camada de saída (LSTM pathway)
         self.out_proj = nn.Sequential(
             nn.Linear(hidden_dim, 2 * hidden_dim),
             nn.GLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, n_stations),
+        )
+
+        # Climate skip connection — caminho direto de features climáticas para delta_t
+        climate_feat_dim = decoder_input_dim - n_stations
+        self.climate_proj = nn.Sequential(
+            nn.Linear(climate_feat_dim, hidden_dim),
+            nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(hidden_dim, n_stations),
         )
@@ -184,15 +193,18 @@ class Seq2SeqHydro(nn.Module):
         # Loop de previsão autoregressiva
         preds: List[torch.Tensor] = []
         g_steps: List[torch.Tensor] = []
-        baseline = sample.baseline_last  # âncora fixa — nunca muda
+        y_prev = sample.baseline_last
+
+        # Adicionar ruído durante treino
+        if self.training and self.input_noise_std > 0.0:
+            y_prev = y_prev + torch.randn_like(y_prev) * self.input_noise_std
 
         for t in range(decoder_horizon):
             idx = decoder_history + t
+            tf_t = float(teacher_forcing_ratio * math.exp(-self.tf_step_decay * t))
 
-            # Features externas (clima + temporal)
+            # Features externas (clima + temporal) — SEM y_prev no LSTM
             ext_features = torch.cat([dec_dyn[:, idx, :], dec_temp[:, idx, :]], dim=-1)
-
-            # Entrada do decoder SEM y_prev
             dec_in_t = ext_features.unsqueeze(1)
 
             if self.training:
@@ -208,9 +220,11 @@ class Seq2SeqHydro(nn.Module):
 
             dec_out_t = self.layernorm(dec_out_t.squeeze(1))
 
-            # Previsão ancorada: delta_t é desvio TOTAL desde baseline (não incremental)
-            delta_t = self.out_proj(dec_out_t)
-            base_pred = baseline + delta_t if self.residual else delta_t
+            # Previsão: LSTM pathway + climate skip connection
+            delta_lstm = self.out_proj(dec_out_t)
+            delta_climate = self.climate_proj(ext_features)
+            delta_t = delta_lstm + delta_climate
+            base_pred = y_prev + delta_t if self.residual else delta_t
 
             # Gate mechanism
             if self.gate_y_prev:
@@ -220,7 +234,6 @@ class Seq2SeqHydro(nn.Module):
 
                 g_raw = torch.sigmoid(self.gate_mlp(gate_inputs))
 
-                # Clamping do gate
                 if self.clamp_gate_by_ceiling:
                     ratio = t / max(1, (decoder_horizon - 1))
                     g_max_t = self.gate_max - (self.gate_max - self.gate_ceiling_min) * ratio
@@ -229,7 +242,7 @@ class Seq2SeqHydro(nn.Module):
                     g_max_t = self.gate_max
 
                 g = self.gate_min + (g_max_t - self.gate_min) * g_raw
-                pred_t = g * baseline + (1.0 - g) * base_pred
+                pred_t = g * y_prev + (1.0 - g) * base_pred
                 g_steps.append(g.unsqueeze(1))
             else:
                 pred_t = base_pred
@@ -238,7 +251,13 @@ class Seq2SeqHydro(nn.Module):
             if self.non_negative:
                 pred_t = F.relu(pred_t)
 
-            # Sem teacher forcing — previsão ancorada não é autoregressiva
+            # Teacher forcing
+            if self.training:
+                use_teacher = (torch.rand(batch_size, 1, device=device) < tf_t).float()
+                y_prev = use_teacher * target[:, t, :] + (1.0 - use_teacher) * pred_t
+            else:
+                y_prev = pred_t
+
             preds.append(pred_t.unsqueeze(1))
 
         # Concatenar previsões
