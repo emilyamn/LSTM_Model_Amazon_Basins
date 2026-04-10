@@ -1,0 +1,13 @@
+{
+  "exp_id": 9,
+  "branch_name": "Improve_model_performance",
+  "exp_name": "autoregressive_climate_skip_gate",
+  "exp_dir": "C:\\Users\\emily\\Documents\\GitHub\\Mini-curso-GitHub-Leo\\outputs\\experiments\\exp_009_Improve_model_performance_autoregressive_climate_skip_gate",
+  "created_at": "2026-04-10 13:18:40",
+  "description": "Volta ao autoregressive com climate_proj e gate. y_prev fora do LSTM. direction=0.3, gate_bias=0.05.",
+  "config_files": [
+    "data_config.yaml",
+    "model_config.yaml",
+    "training_config.yaml"
+  ]
+}
