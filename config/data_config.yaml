@@ -1,9 +1,9 @@
 # ==========================================================
 # NOMENCLATURA DESCRITIVA DO EXPERIMENTO 
 # ==========================================================
-experiment_name: anchored_prediction
-description: Previsão ancorada ao baseline — pred_t = baseline + delta_t (sem acumulação de erro). Gate desativado. Climate skip connection ativa. Modelo prediz desvio total desde última observação.
-model_name: model_anchored
+experiment_name: anchored_high_direction
+description: Sem climate_proj (cancelava LSTM). lambda_direction=1.0 forca modelo a acertar direcao de variacao. Previsao ancorada ao baseline.
+model_name: model_anchored_highdir
 
 # ==========================================================
 # CONFIGURAÇÕES DE ESTAÇÕES E ATRIBUTOS ESTÁTICOS

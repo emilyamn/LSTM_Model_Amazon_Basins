@@ -14,7 +14,7 @@ from src.model.layers import StaticEmbedding
 
 class Seq2SeqHydro(nn.Module):
     """Modelo Seq2Seq para previsão de vazões."""
-    
+
     def __init__(
         self,
         encoder_input_dim: int,
@@ -43,7 +43,7 @@ class Seq2SeqHydro(nn.Module):
     ):
         """
         Inicializa o modelo Seq2SeqHydro.
-        
+
         Args:
             encoder_input_dim: Dimensão de entrada do encoder
             decoder_input_dim: Dimensão de entrada do decoder
@@ -88,16 +88,16 @@ class Seq2SeqHydro(nn.Module):
         self.gate_from_inputs = gate_from_inputs
         self.gate_min = gate_min
         self.gate_max = gate_max
-        
+
         # Encoder LSTM
         self.encoder = nn.LSTM(
-            encoder_input_dim, 
-            hidden_dim, 
-            num_layers=num_layers, 
+            encoder_input_dim,
+            hidden_dim,
+            num_layers=num_layers,
             batch_first=True,
             dropout=dropout if num_layers > 1 else 0.0,
         )
-        
+
         # Decoder LSTM — SEM y_prev no input (forçar aprendizado de clima)
         # decoder_input_dim inclui n_stations (y_prev), mas o LSTM recebe sem y_prev
         self.decoder_lstm_dim = decoder_input_dim - n_stations
@@ -108,33 +108,24 @@ class Seq2SeqHydro(nn.Module):
             batch_first=True,
             dropout=dropout if num_layers > 1 else 0.0,
         )
-        
+
         # Camada de atenção
         if attention:
             self.attn_layer = nn.MultiheadAttention(
-                hidden_dim, 
-                num_heads=4, 
-                dropout=dropout, 
+                hidden_dim,
+                num_heads=4,
+                dropout=dropout,
                 batch_first=True
             )
-        
+
         # Normalização e embedding estático
         self.layernorm = nn.LayerNorm(hidden_dim)
         self.static_embed = StaticEmbedding(n_static, hidden_dim * num_layers)
 
-        # Camada de saída (LSTM pathway)
+        # Camada de saída
         self.out_proj = nn.Sequential(
             nn.Linear(hidden_dim, 2 * hidden_dim),
             nn.GLU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim, n_stations),
-        )
-
-        # Climate skip connection — caminho direto de features climáticas para delta_t
-        climate_feat_dim = decoder_input_dim - n_stations
-        self.climate_proj = nn.Sequential(
-            nn.Linear(climate_feat_dim, hidden_dim),
-            nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(hidden_dim, n_stations),
         )
@@ -161,13 +152,13 @@ class Seq2SeqHydro(nn.Module):
     ) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
         """
         Forward pass do modelo.
-        
+
         Args:
             sample: Objeto Sample com dados de entrada
             teacher_forcing_ratio: Razão de teacher forcing
             decoder_history: Número de passos históricos no decoder
             decoder_horizon: Horizonte de previsão
-            
+
         Returns:
             Tupla com (previsões, máscara, gates)
         """
@@ -218,9 +209,7 @@ class Seq2SeqHydro(nn.Module):
             dec_out_t = self.layernorm(dec_out_t.squeeze(1))
 
             # Previsão ancorada: delta_t é desvio TOTAL desde baseline (não incremental)
-            delta_lstm = self.out_proj(dec_out_t)
-            delta_climate = self.climate_proj(ext_features)
-            delta_t = delta_lstm + delta_climate
+            delta_t = self.out_proj(dec_out_t)
             base_pred = baseline + delta_t if self.residual else delta_t
 
             # Gate mechanism
@@ -240,7 +229,7 @@ class Seq2SeqHydro(nn.Module):
                     g_max_t = self.gate_max
 
                 g = self.gate_min + (g_max_t - self.gate_min) * g_raw
-                pred_t = g * y_prev + (1.0 - g) * base_pred
+                pred_t = g * baseline + (1.0 - g) * base_pred
                 g_steps.append(g.unsqueeze(1))
             else:
                 pred_t = base_pred
@@ -255,5 +244,5 @@ class Seq2SeqHydro(nn.Module):
         # Concatenar previsões
         preds = torch.cat(preds, dim=1)
         g_seq = torch.cat(g_steps, dim=1) if len(g_steps) > 0 else None
-        
+
         return preds, sample.mask_dec[:, decoder_history:, :], g_seq
