@@ -193,20 +193,15 @@ class Seq2SeqHydro(nn.Module):
         # Loop de previsão autoregressiva
         preds: List[torch.Tensor] = []
         g_steps: List[torch.Tensor] = []
-        y_prev = sample.baseline_last
-
-        # Adicionar ruído durante treino
-        if self.training and self.input_noise_std > 0.0:
-            y_prev = y_prev + torch.randn_like(y_prev) * self.input_noise_std
+        baseline = sample.baseline_last  # âncora fixa — nunca muda
 
         for t in range(decoder_horizon):
             idx = decoder_history + t
-            tf_t = float(teacher_forcing_ratio * math.exp(-self.tf_step_decay * t))
 
-            # Features externas (clima + temporal) — usadas em LSTM, climate_proj e gate
+            # Features externas (clima + temporal)
             ext_features = torch.cat([dec_dyn[:, idx, :], dec_temp[:, idx, :]], dim=-1)
 
-            # Entrada do decoder SEM y_prev (forçar aprendizado de clima)
+            # Entrada do decoder SEM y_prev
             dec_in_t = ext_features.unsqueeze(1)
 
             if self.training:
@@ -222,11 +217,11 @@ class Seq2SeqHydro(nn.Module):
 
             dec_out_t = self.layernorm(dec_out_t.squeeze(1))
 
-            # Previsão base: LSTM pathway + climate skip connection
+            # Previsão ancorada: delta_t é desvio TOTAL desde baseline (não incremental)
             delta_lstm = self.out_proj(dec_out_t)
             delta_climate = self.climate_proj(ext_features)
             delta_t = delta_lstm + delta_climate
-            base_pred = y_prev + delta_t if self.residual else delta_t
+            base_pred = baseline + delta_t if self.residual else delta_t
 
             # Gate mechanism
             if self.gate_y_prev:
@@ -254,13 +249,7 @@ class Seq2SeqHydro(nn.Module):
             if self.non_negative:
                 pred_t = F.relu(pred_t)
 
-            # Teacher forcing
-            if self.training:
-                use_teacher = (torch.rand(batch_size, 1, device=device) < tf_t).float()
-                y_prev = use_teacher * target[:, t, :] + (1.0 - use_teacher) * pred_t
-            else:
-                y_prev = pred_t
-
+            # Sem teacher forcing — previsão ancorada não é autoregressiva
             preds.append(pred_t.unsqueeze(1))
 
         # Concatenar previsões

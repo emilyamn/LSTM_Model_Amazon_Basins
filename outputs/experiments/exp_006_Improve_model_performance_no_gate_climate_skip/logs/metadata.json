@@ -1,0 +1,13 @@
+{
+  "exp_id": 6,
+  "branch_name": "Improve_model_performance",
+  "exp_name": "no_gate_climate_skip",
+  "exp_dir": "C:\\Users\\emily\\Documents\\GitHub\\Mini-curso-GitHub-Leo\\outputs\\experiments\\exp_006_Improve_model_performance_no_gate_climate_skip",
+  "created_at": "2026-04-09 21:22:54",
+  "description": "Gate desativado \u2014 pred_t = y_prev + delta_t (residual puro). Climate skip connection ativa. Modelo for\u00e7ado a responder a for\u00e7antes clim\u00e1ticas sem dampening do gate.",
+  "config_files": [
+    "data_config.yaml",
+    "model_config.yaml",
+    "training_config.yaml"
+  ]
+}

@@ -1,9 +1,9 @@
 # ==========================================================
 # NOMENCLATURA DESCRITIVA DO EXPERIMENTO 
 # ==========================================================
-experiment_name: no_gate_climate_skip
-description: Gate desativado — pred_t = y_prev + delta_t (residual puro). Climate skip connection ativa. Modelo forçado a responder a forçantes climáticas sem dampening do gate.
-model_name: model_no_gate_climate_skip
+experiment_name: anchored_prediction
+description: Previsão ancorada ao baseline — pred_t = baseline + delta_t (sem acumulação de erro). Gate desativado. Climate skip connection ativa. Modelo prediz desvio total desde última observação.
+model_name: model_anchored
 
 # ==========================================================
 # CONFIGURAÇÕES DE ESTAÇÕES E ATRIBUTOS ESTÁTICOS
