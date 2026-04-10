@@ -1,0 +1,13 @@
+{
+  "exp_id": 5,
+  "branch_name": "Improve_model_performance",
+  "exp_name": "adjustment_architecture_remove_ypred_MLP_for_climate",
+  "exp_dir": "C:\\Users\\emily\\Documents\\GitHub\\Mini-curso-GitHub-Leo\\outputs\\experiments\\exp_005_Improve_model_performance_adjustment_architecture_remove_ypred_MLP_for_climate",
+  "created_at": "2026-04-09 18:09:09",
+  "description": "y_prev removido da entrada do LSTM \u2014 o decoder agora recebe apenas [dec_dyn, dec_temp] (55 features ao inv\u00e9s de 58). y_prev continua usado na conex\u00e3o residual (base_pred = y_prev + delta_t) e no gate. Climate skip connection adicionada \u2014 nova climate_proj MLP que mapeia features clim\u00e1ticas diretamente para delta_t, sem passar pelo gargalo do LSTM",
+  "config_files": [
+    "data_config.yaml",
+    "model_config.yaml",
+    "training_config.yaml"
+  ]
+}

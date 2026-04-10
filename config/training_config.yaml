@@ -19,7 +19,7 @@ loss_weights:
   negative: 0.01
   continuity: 0.001
   slope: 0.3
-  gate_bias: 0.05
+  gate_bias: 0.0
   direction: 0.10
 
 # Pesos por horizonte

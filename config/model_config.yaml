@@ -7,9 +7,9 @@ architecture:
   residual: true
   non_negative: false
 
-# Parâmetros do gate
+# Parâmetros do gate — DESATIVADO (residual connection já garante persistência)
 gate:
-  y_prev: true
+  y_prev: false
   from_inputs: true
   clamp_by_ceiling: false
   ceiling_min: 0.15

@@ -1,9 +1,9 @@
 # ==========================================================
 # NOMENCLATURA DESCRITIVA DO EXPERIMENTO 
 # ==========================================================
-experiment_name: adjustment_architecture_remove_ypred_MLP_for_climate
-description: y_prev removido da entrada do LSTM — o decoder agora recebe apenas [dec_dyn, dec_temp] (55 features ao invés de 58). y_prev continua usado na conexão residual (base_pred = y_prev + delta_t) e no gate. Climate skip connection adicionada — nova climate_proj MLP que mapeia features climáticas diretamente para delta_t, sem passar pelo gargalo do LSTM
-model_name: model_remove_ypred_MLP_for_climate
+experiment_name: no_gate_climate_skip
+description: Gate desativado — pred_t = y_prev + delta_t (residual puro). Climate skip connection ativa. Modelo forçado a responder a forçantes climáticas sem dampening do gate.
+model_name: model_no_gate_climate_skip
 
 # ==========================================================
 # CONFIGURAÇÕES DE ESTAÇÕES E ATRIBUTOS ESTÁTICOS
