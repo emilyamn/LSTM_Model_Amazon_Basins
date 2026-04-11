@@ -1,9 +1,9 @@
 # ==========================================================
 # NOMENCLATURA DESCRITIVA DO EXPERIMENTO 
 # ==========================================================
-experiment_name: autoregressive_climate_skip_gate
-description: Volta ao autoregressive com climate_proj e gate. y_prev fora do LSTM. direction=0.3, gate_bias=0.05.
-model_name: model_autoreg_climateskip
+experiment_name: diagnostic
+description: Exp09 with diagnostic
+model_name: model_diagnostic
 
 # ==========================================================
 # CONFIGURAÇÕES DE ESTAÇÕES E ATRIBUTOS ESTÁTICOS

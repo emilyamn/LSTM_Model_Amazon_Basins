@@ -265,3 +265,103 @@ class Seq2SeqHydro(nn.Module):
         g_seq = torch.cat(g_steps, dim=1) if len(g_steps) > 0 else None
 
         return preds, sample.mask_dec[:, decoder_history:, :], g_seq
+
+    @torch.no_grad()
+    def diagnostic_forward(
+        self,
+        sample: Sample,
+        decoder_history: int,
+        decoder_horizon: int,
+    ) -> Tuple[torch.Tensor, dict]:
+        """
+        Forward pass com captura de diagnósticos internos (modo inferência).
+
+        Returns:
+            Tupla com (previsões, diagnostics_dict)
+        """
+        self.eval()
+        device = sample.encoder_dyn.device
+
+        enc_in = sample.encoder_dyn
+        dec_dyn = sample.decoder_dyn
+        dec_temp = sample.temporal_dec
+        static_feats = sample.static
+
+        # Embedding estático
+        static_embed = self.static_embed(static_feats)
+        static_embed = static_embed.view(-1, self.num_layers, self.hidden_dim)
+        static_embed = static_embed.permute(1, 0, 2).contiguous()
+
+        # Encoder
+        enc_out, (h, c) = self.encoder(enc_in, (static_embed, static_embed))
+        attn_memory = enc_out if self.attention else None
+
+        # Diagnósticos
+        diag = {
+            'delta_lstm': [],
+            'delta_climate': [],
+            'delta_total': [],
+            'gate': [],
+            'y_prev': [],
+            'pred': [],
+            'ext_features_mean': [],
+            'ext_features_std': [],
+        }
+
+        preds: List[torch.Tensor] = []
+        y_prev = sample.baseline_last
+
+        for t in range(decoder_horizon):
+            idx = decoder_history + t
+
+            ext_features = torch.cat([dec_dyn[:, idx, :], dec_temp[:, idx, :]], dim=-1)
+            dec_in_t = ext_features.unsqueeze(1)
+
+            dec_out_t, (h, c) = self.decoder(dec_in_t, (h, c))
+
+            if self.attention:
+                attn_out, _ = self.attn_layer(dec_out_t, attn_memory, attn_memory)
+                dec_out_t = dec_out_t + attn_out
+
+            dec_out_t = self.layernorm(dec_out_t.squeeze(1))
+
+            delta_lstm = self.out_proj(dec_out_t)
+            delta_climate = self.climate_proj(ext_features)
+            delta_t = delta_lstm + delta_climate
+            base_pred = y_prev + delta_t if self.residual else delta_t
+
+            if self.gate_y_prev:
+                gate_inputs = ext_features
+                g_raw = torch.sigmoid(self.gate_mlp(gate_inputs))
+
+                if self.clamp_gate_by_ceiling:
+                    ratio = t / max(1, (decoder_horizon - 1))
+                    g_max_t = self.gate_max - (self.gate_max - self.gate_ceiling_min) * ratio
+                    g_max_t = max(self.gate_min + 1e-3, g_max_t)
+                else:
+                    g_max_t = self.gate_max
+
+                g = self.gate_min + (g_max_t - self.gate_min) * g_raw
+                pred_t = g * y_prev + (1.0 - g) * base_pred
+            else:
+                g = torch.zeros_like(delta_t)
+                pred_t = base_pred
+
+            if self.non_negative:
+                pred_t = F.relu(pred_t)
+
+            # Capturar diagnósticos
+            diag['delta_lstm'].append(delta_lstm.detach())
+            diag['delta_climate'].append(delta_climate.detach())
+            diag['delta_total'].append(delta_t.detach())
+            diag['gate'].append(g.detach())
+            diag['y_prev'].append(y_prev.detach())
+            diag['pred'].append(pred_t.detach())
+            diag['ext_features_mean'].append(ext_features.mean(dim=-1).detach())
+            diag['ext_features_std'].append(ext_features.std(dim=-1).detach())
+
+            y_prev = pred_t
+            preds.append(pred_t.unsqueeze(1))
+
+        preds = torch.cat(preds, dim=1)
+        return preds, diag

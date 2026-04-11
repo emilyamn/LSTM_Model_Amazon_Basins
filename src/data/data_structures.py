@@ -39,28 +39,31 @@ class Sample:
     date_index: Optional[int] = None           # índice do center no dataframe original
 
 
-def compute_scaler(values: np.ndarray) -> Scaler:
+def compute_scaler(values: np.ndarray, silent: bool = False) -> Scaler:
     """
     Calcula scaler para um conjunto de valores.
-    
+
     Args:
         values: Array com valores
-        
+        silent: Se True, suprime warnings (usado para scalers dummy)
+
     Returns:
         Objeto Scaler
     """
     # Remove NaN antes de calcular estatísticas
     clean_values = values[~np.isnan(values)]
-    
+
     if len(clean_values) == 0:
-        print("⚠️ Aviso: Todos os valores são NaN, usando scaler padrão")
+        if not silent:
+            print("⚠️ Aviso: Todos os valores são NaN, usando scaler padrão")
         return Scaler(mean=0.0, std=1.0)
-    
+
     mean = float(np.mean(clean_values))
     std = float(np.std(clean_values))
-    
+
     if std < 1e-6:
-        print(f"⚠️ Aviso: Desvio padrão muito baixo ({std}), ajustando para 1.0")
+        if not silent:
+            print(f"⚠️ Aviso: Desvio padrão muito baixo ({std}), ajustando para 1.0")
         std = 1.0
-    
+
     return Scaler(mean, std)

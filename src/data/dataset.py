@@ -85,11 +85,12 @@ class HydroDataset(Dataset):
 
     def _register_scalers(self, train_indices: np.ndarray):
         """Registra escaladores para todas as features usando os novos nomes de colunas."""
+        silent = len(train_indices) <= 1  # dummy indices → suprimir warnings
 
         def register(col_name: str):
             if col_name in self.df.columns:
                 self.climate_scalers[col_name] = compute_scaler(
-                    self.df[col_name].iloc[train_indices].to_numpy()
+                    self.df[col_name].iloc[train_indices].to_numpy(), silent=silent
                 )
 
         need_et = self.forcings == "P_ET"
@@ -97,7 +98,7 @@ class HydroDataset(Dataset):
         for st in self.stations:
             # Vazão
             self.flow_scalers[f"Q_{st}"] = compute_scaler(
-                self.df[f"Q_{st}"].iloc[train_indices].to_numpy()
+                self.df[f"Q_{st}"].iloc[train_indices].to_numpy(), silent=silent
             )
 
             # Precipitação unificada
@@ -128,7 +129,8 @@ class HydroDataset(Dataset):
 
             if f"regime_state_{st}" in self.df.columns:
                 self.climate_scalers[f"regime_state_{st}"] = compute_scaler(
-                    self.df[f"regime_state_{st}"].iloc[train_indices].astype(np.float32).to_numpy()
+                    self.df[f"regime_state_{st}"].iloc[train_indices].astype(np.float32).to_numpy(),
+                    silent=silent
                 )
 
             # Log-anomaly
@@ -142,7 +144,7 @@ class HydroDataset(Dataset):
             vals = np.array(
                 [self.static_attrs[st][key] for st in self.stations], dtype=np.float32
             )
-            self.static_scalers[key] = compute_scaler(vals)
+            self.static_scalers[key] = compute_scaler(vals, silent=silent)
 
     # ------------------------------------------------------------------
     # Índices válidos
