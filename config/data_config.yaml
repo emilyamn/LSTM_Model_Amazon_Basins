@@ -1,9 +1,9 @@
 # ==========================================================
 # NOMENCLATURA DESCRITIVA DO EXPERIMENTO 
 # ==========================================================
-experiment_name: diagnostic
-description: Exp09 with diagnostic
-model_name: model_diagnostic
+experiment_name: direction_warmup_low_gate
+description: Gate max=0.35, direction=1.0, gate_bias=0.3, warmup 2x direction/slope nas primeiras 5 epochs.
+model_name: model_direction_warmup
 
 # ==========================================================
 # CONFIGURAÇÕES DE ESTAÇÕES E ATRIBUTOS ESTÁTICOS

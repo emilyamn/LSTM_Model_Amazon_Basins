@@ -114,6 +114,15 @@ def train_model(
         # Reduzir continuidade com o tempo
         lambda_cont_epoch = lambda_continuity * (0.95 ** (epoch - 1))
 
+        # Warmup de direction/slope: peso 2x nas primeiras 5 epochs, depois decai para 1x
+        warmup_epochs = 5
+        if epoch <= warmup_epochs:
+            warmup_mult = 2.0
+        else:
+            warmup_mult = max(1.0, 2.0 * (0.85 ** (epoch - warmup_epochs)))
+        lambda_direction_epoch = lambda_direction * warmup_mult
+        lambda_slope_epoch = lambda_slope * warmup_mult
+
         # Treino
         model.train()
         train_losses = []
@@ -135,10 +144,10 @@ def train_model(
                 g_seq=g_seq,
                 lambda_gate_bias=lambda_gate_bias,
                 gate_decay=gate_decay,
-                lambda_direction=lambda_direction,
+                lambda_direction=lambda_direction_epoch,
                 direction_start=direction_start,
                 dir_weight_gamma=dir_weight_gamma,
-                lambda_slope=lambda_slope
+                lambda_slope=lambda_slope_epoch
             )
 
             optimizer.zero_grad()
@@ -170,10 +179,10 @@ def train_model(
                     g_seq=g_seq,
                     lambda_gate_bias=lambda_gate_bias,
                     gate_decay=gate_decay,
-                    lambda_direction=lambda_direction,
+                    lambda_direction=lambda_direction_epoch,
                     direction_start=direction_start,
                     dir_weight_gamma=dir_weight_gamma,
-                    lambda_slope=lambda_slope
+                    lambda_slope=lambda_slope_epoch
                 )
                 val_losses.append(loss.item())
 
@@ -189,7 +198,7 @@ def train_model(
         else:
             no_improve += 1
 
-        print(f"[Epoch {epoch:02d}] train={avg_train:.4f} val={avg_val:.4f} tf={tf_ratio:.3f}")
+        print(f"[Epoch {epoch:02d}] train={avg_train:.4f} val={avg_val:.4f} tf={tf_ratio:.3f} dir/slope_mult={warmup_mult:.2f}")
 
         if no_improve >= patience:
             print("Early stopping.")
