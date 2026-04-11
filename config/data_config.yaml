@@ -1,9 +1,9 @@
 # ==========================================================
 # NOMENCLATURA DESCRITIVA DO EXPERIMENTO 
 # ==========================================================
-experiment_name: direction_warmup_low_gate
-description: Gate max=0.35, direction=1.0, gate_bias=0.3, warmup 2x direction/slope nas primeiras 5 epochs.
-model_name: model_direction_warmup
+experiment_name: climate_proj_fix_no_flow
+description: climate_proj recebe apenas features climaticas (sem fluxo). Gate max=0.35, direction=1.0, warmup.
+model_name: model_climate_proj_fix
 
 # ==========================================================
 # CONFIGURAÇÕES DE ESTAÇÕES E ATRIBUTOS ESTÁTICOS

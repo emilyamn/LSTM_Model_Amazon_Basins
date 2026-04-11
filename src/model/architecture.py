@@ -40,6 +40,7 @@ class Seq2SeqHydro(nn.Module):
         y_prev_mask_step_gamma: float = 0.20,
         gate_min: float = 0.0,
         gate_max: float = 0.60,
+        n_decoder_flow_feats: int = 0,
     ):
         """
         Inicializa o modelo Seq2SeqHydro.
@@ -88,6 +89,7 @@ class Seq2SeqHydro(nn.Module):
         self.gate_from_inputs = gate_from_inputs
         self.gate_min = gate_min
         self.gate_max = gate_max
+        self.n_decoder_flow_feats = n_decoder_flow_feats
 
         # Encoder LSTM
         self.encoder = nn.LSTM(
@@ -131,7 +133,8 @@ class Seq2SeqHydro(nn.Module):
         )
 
         # Climate skip connection — caminho direto de features climáticas para delta_t
-        climate_feat_dim = decoder_input_dim - n_stations
+        # Exclui features de fluxo (n_decoder_flow_feats) do input da climate_proj
+        climate_feat_dim = decoder_input_dim - n_stations - n_decoder_flow_feats
         self.climate_proj = nn.Sequential(
             nn.Linear(climate_feat_dim, hidden_dim),
             nn.ReLU(),
@@ -222,7 +225,9 @@ class Seq2SeqHydro(nn.Module):
 
             # Previsão: LSTM pathway + climate skip connection
             delta_lstm = self.out_proj(dec_out_t)
-            delta_climate = self.climate_proj(ext_features)
+            # climate_proj recebe apenas features climáticas (sem fluxo)
+            climate_only = ext_features[:, self.n_decoder_flow_feats:]
+            delta_climate = self.climate_proj(climate_only)
             delta_t = delta_lstm + delta_climate
             base_pred = y_prev + delta_t if self.residual else delta_t
 
@@ -326,7 +331,8 @@ class Seq2SeqHydro(nn.Module):
             dec_out_t = self.layernorm(dec_out_t.squeeze(1))
 
             delta_lstm = self.out_proj(dec_out_t)
-            delta_climate = self.climate_proj(ext_features)
+            climate_only = ext_features[:, self.n_decoder_flow_feats:]
+            delta_climate = self.climate_proj(climate_only)
             delta_t = delta_lstm + delta_climate
             base_pred = y_prev + delta_t if self.residual else delta_t
 
