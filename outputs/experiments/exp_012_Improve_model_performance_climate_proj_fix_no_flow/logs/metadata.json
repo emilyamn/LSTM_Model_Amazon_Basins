@@ -1,0 +1,13 @@
+{
+  "exp_id": 12,
+  "branch_name": "Improve_model_performance",
+  "exp_name": "climate_proj_fix_no_flow",
+  "exp_dir": "C:\\Users\\emily\\Documents\\GitHub\\Mini-curso-GitHub-Leo\\outputs\\experiments\\exp_012_Improve_model_performance_climate_proj_fix_no_flow",
+  "created_at": "2026-04-11 10:07:34",
+  "description": "climate_proj recebe apenas features climaticas (sem fluxo). Gate max=0.35, direction=1.0, warmup.",
+  "config_files": [
+    "data_config.yaml",
+    "model_config.yaml",
+    "training_config.yaml"
+  ]
+}

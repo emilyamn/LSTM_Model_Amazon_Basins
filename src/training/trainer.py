@@ -114,8 +114,8 @@ def train_model(
         # Reduzir continuidade com o tempo
         lambda_cont_epoch = lambda_continuity * (0.95 ** (epoch - 1))
 
-        # Warmup de direction/slope: peso 2x nas primeiras 5 epochs, depois decai para 1x
-        warmup_epochs = 5
+        # Warmup de direction/slope: peso 2x nas primeiras 10 epochs, depois decai para 1x
+        warmup_epochs = 10
         if epoch <= warmup_epochs:
             warmup_mult = 2.0
         else:

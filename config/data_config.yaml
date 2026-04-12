@@ -1,9 +1,9 @@
 # ==========================================================
 # NOMENCLATURA DESCRITIVA DO EXPERIMENTO 
 # ==========================================================
-experiment_name: climate_proj_fix_no_flow
-description: climate_proj recebe apenas features climaticas (sem fluxo). Gate max=0.35, direction=1.0, warmup.
-model_name: model_climate_proj_fix
+experiment_name: zeroinit_lowlr_warmup10
+description: climate_proj zero-init, LR=0.0005, scheduler patience=10, warmup 10 epochs, sem fluxo em climate_proj.
+model_name: model_zeroinit_lowlr
 
 # ==========================================================
 # CONFIGURAÇÕES DE ESTAÇÕES E ATRIBUTOS ESTÁTICOS

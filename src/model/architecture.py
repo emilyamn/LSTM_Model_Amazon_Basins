@@ -135,11 +135,15 @@ class Seq2SeqHydro(nn.Module):
         # Climate skip connection — caminho direto de features climáticas para delta_t
         # Exclui features de fluxo (n_decoder_flow_feats) do input da climate_proj
         climate_feat_dim = decoder_input_dim - n_stations - n_decoder_flow_feats
+        climate_out = nn.Linear(hidden_dim, n_stations)
+        # Zero-init: climate_proj começa em 0, só aprende desvios via direction loss
+        nn.init.zeros_(climate_out.weight)
+        nn.init.zeros_(climate_out.bias)
         self.climate_proj = nn.Sequential(
             nn.Linear(climate_feat_dim, hidden_dim),
             nn.ReLU(),
             nn.Dropout(dropout),
-            nn.Linear(hidden_dim, n_stations),
+            climate_out,
         )
 
         # Dropouts

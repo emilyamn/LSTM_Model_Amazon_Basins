@@ -1,0 +1,213 @@
+data:
+  experiment_name: climate_proj_fix_no_flow
+  description: climate_proj recebe apenas features climaticas (sem fluxo). Gate max=0.35,
+    direction=1.0, warmup.
+  model_name: model_climate_proj_fix
+  stations:
+  - 10100000
+  - 13150000
+  - 14100000
+  static_keys:
+  - area
+  - elev_mean
+  - slope_mean
+  - AI_mean
+  static_attributes:
+    10100000:
+      area: 985960.227
+      elev_mean: 1169.482
+      slope_mean: 11.98
+      AI_mean: 16705.015625
+    13150000:
+      area: 1228406.577
+      elev_mean: 977.5172
+      slope_mean: 10.66077
+      AI_mean: 18044.228516
+    14100000:
+      area: 2204799.054
+      elev_mean: 11.98524
+      slope_mean: 8.19661
+      AI_mean: 18840.925781
+  horizon: 15
+  flow_window_config:
+    10100000:
+      encoder:
+      - source: 10100000
+        start: -30
+        end: -1
+        travel_time: 0
+      decoder:
+      - source: 10100000
+        start: -30
+        end: -1
+        travel_time: 0
+    13150000:
+      encoder:
+      - source: 10100000
+        start: -23
+        end: -1
+        travel_time: 7
+      - source: 13150000
+        start: -30
+        end: -1
+        travel_time: 0
+      decoder:
+      - source: 10100000
+        start: -23
+        end: -1
+        travel_time: 7
+      - source: 13150000
+        start: -30
+        end: -1
+        travel_time: 0
+    14100000:
+      encoder:
+      - source: 10100000
+        start: -15
+        end: -1
+        travel_time: 15
+      - source: 13150000
+        start: -22
+        end: -1
+        travel_time: 8
+      - source: 14100000
+        start: -30
+        end: -1
+        travel_time: 0
+      decoder:
+      - source: 10100000
+        start: -15
+        end: -1
+        travel_time: 15
+      - source: 13150000
+        start: -22
+        end: -1
+        travel_time: 8
+      - source: 14100000
+        start: -30
+        end: -1
+        travel_time: 0
+  climate_window_config:
+    10100000:
+      encoder:
+      - -30
+      - -1
+      decoder:
+      - -30
+      - 14
+    13150000:
+      encoder:
+      - -30
+      - -1
+      decoder:
+      - -30
+      - 14
+    14100000:
+      encoder:
+      - -30
+      - -1
+      decoder:
+      - -30
+      - 14
+  temporal_features:
+  - day_sin
+  - day_cos
+  - month_sin
+  - month_cos
+  api_k_list:
+  - 0.7
+  - 0.8
+  - 0.85
+  - 0.9
+  - 0.92
+  - 0.95
+  precipitation_ma:
+  - 3
+  - 7
+  - 15
+  precipitation_cum:
+  - 3
+  - 5
+  - 7
+  - 10
+  evapotranspiration_ma:
+  - 7
+  - 14
+  - 30
+  anomaly_ma:
+  - 3
+  - 7
+  forecast_ma:
+  - 3
+  - 7
+  - 15
+  forecast_cum:
+  - 3
+  - 5
+  - 7
+  - 10
+  reference_dates:
+  - '2026-03-16'
+  split_config:
+    train_ratio: 0.85
+    val_ratio: 0.1
+    test_ratio: 0.05
+    gap: 128
+    window_stride: 1
+model:
+  architecture:
+    hidden_dim: 256
+    num_layers: 3
+    dropout: 0.2
+    attention: true
+    residual: true
+    non_negative: false
+  gate:
+    y_prev: true
+    from_inputs: true
+    clamp_by_ceiling: false
+    ceiling_min: 0.15
+    detach_y_prev: true
+    min: 0.1
+    max: 0.35
+  regularization:
+    input_noise_std: 0.05
+    y_prev_dropout_p: 0.3
+    y_prev_mask_p: 0.3
+    y_prev_mask_step_gamma: 0.2
+    decoder_feat_dropout_p: 0.15
+    tf_step_decay: 0.15
+  misc:
+    device: cuda
+training:
+  epochs: 50
+  batch_size: 64
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  clip_grad_norm: 3.0
+  teacher_forcing:
+    initial: 0.25
+    decay: 0.88
+    final: 0.0
+    free_run_tail: 0
+    early_free_run_patience: 3
+  loss_weights:
+    smooth: 0.0
+    negative: 0.01
+    continuity: 0.001
+    slope: 0.3
+    gate_bias: 0.3
+    direction: 1.0
+  horizon_weights:
+    mode: increasing
+    gamma: 0.03
+  direction:
+    start: 0
+    weight_gamma: 0.05
+  gate_decay: 0.06
+  early_stopping:
+    patience: 20
+    min_delta: 0.0001
+  scheduler:
+    patience: 6
+    factor: 0.7
