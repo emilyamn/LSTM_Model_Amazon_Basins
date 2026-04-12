@@ -100,9 +100,9 @@ class Seq2SeqHydro(nn.Module):
             dropout=dropout if num_layers > 1 else 0.0,
         )
 
-        # Decoder LSTM — SEM y_prev no input (forçar aprendizado de clima)
-        # decoder_input_dim inclui n_stations (y_prev), mas o LSTM recebe sem y_prev
-        self.decoder_lstm_dim = decoder_input_dim - n_stations
+        # Decoder LSTM — recebe apenas climate + temporal (sem flow, sem y_prev)
+        # Flow history vem pelo hidden state do encoder
+        self.decoder_lstm_dim = decoder_input_dim - n_stations - n_decoder_flow_feats
         self.decoder = nn.LSTM(
             self.decoder_lstm_dim,
             hidden_dim,
@@ -135,23 +135,19 @@ class Seq2SeqHydro(nn.Module):
         # Climate skip connection — caminho direto de features climáticas para delta_t
         # Exclui features de fluxo (n_decoder_flow_feats) do input da climate_proj
         climate_feat_dim = decoder_input_dim - n_stations - n_decoder_flow_feats
-        climate_out = nn.Linear(hidden_dim, n_stations)
-        # Zero-init: climate_proj começa em 0, só aprende desvios via direction loss
-        nn.init.zeros_(climate_out.weight)
-        nn.init.zeros_(climate_out.bias)
         self.climate_proj = nn.Sequential(
             nn.Linear(climate_feat_dim, hidden_dim),
             nn.ReLU(),
             nn.Dropout(dropout),
-            climate_out,
+            nn.Linear(hidden_dim, n_stations),
         )
 
         # Dropouts
         self.y_prev_dropout = nn.Dropout(p=y_prev_dropout_p)
         self.decoder_in_dropout = nn.Dropout(p=decoder_feat_dropout_p)
 
-        # MLP para gate
-        gate_in_dim = (decoder_input_dim - n_stations) if gate_from_inputs else hidden_dim
+        # MLP para gate (sem flow features — evita sinal espúrio de zeros no horizonte)
+        gate_in_dim = (decoder_input_dim - n_stations - n_decoder_flow_feats) if gate_from_inputs else hidden_dim
         self.gate_mlp = nn.Sequential(
             nn.Linear(gate_in_dim, hidden_dim),
             nn.ReLU(),
@@ -210,9 +206,11 @@ class Seq2SeqHydro(nn.Module):
             idx = decoder_history + t
             tf_t = float(teacher_forcing_ratio * math.exp(-self.tf_step_decay * t))
 
-            # Features externas (clima + temporal) — SEM y_prev no LSTM
+            # Features externas (todas: flow + clima + temporal)
             ext_features = torch.cat([dec_dyn[:, idx, :], dec_temp[:, idx, :]], dim=-1)
-            dec_in_t = ext_features.unsqueeze(1)
+            # Excluir flow features (zeros no horizonte) — LSTM só vê clima + temporal
+            climate_only = ext_features[:, self.n_decoder_flow_feats:]
+            dec_in_t = climate_only.unsqueeze(1)
 
             if self.training:
                 dec_in_t = self.decoder_in_dropout(dec_in_t)
@@ -229,15 +227,13 @@ class Seq2SeqHydro(nn.Module):
 
             # Previsão: LSTM pathway + climate skip connection
             delta_lstm = self.out_proj(dec_out_t)
-            # climate_proj recebe apenas features climáticas (sem fluxo)
-            climate_only = ext_features[:, self.n_decoder_flow_feats:]
             delta_climate = self.climate_proj(climate_only)
             delta_t = delta_lstm + delta_climate
             base_pred = y_prev + delta_t if self.residual else delta_t
 
             # Gate mechanism
             if self.gate_y_prev:
-                gate_inputs = ext_features
+                gate_inputs = climate_only
                 if self.detach_y_prev_in_gate:
                     gate_inputs = gate_inputs.detach()
 
@@ -324,7 +320,8 @@ class Seq2SeqHydro(nn.Module):
             idx = decoder_history + t
 
             ext_features = torch.cat([dec_dyn[:, idx, :], dec_temp[:, idx, :]], dim=-1)
-            dec_in_t = ext_features.unsqueeze(1)
+            climate_only = ext_features[:, self.n_decoder_flow_feats:]
+            dec_in_t = climate_only.unsqueeze(1)
 
             dec_out_t, (h, c) = self.decoder(dec_in_t, (h, c))
 
@@ -335,13 +332,12 @@ class Seq2SeqHydro(nn.Module):
             dec_out_t = self.layernorm(dec_out_t.squeeze(1))
 
             delta_lstm = self.out_proj(dec_out_t)
-            climate_only = ext_features[:, self.n_decoder_flow_feats:]
             delta_climate = self.climate_proj(climate_only)
             delta_t = delta_lstm + delta_climate
             base_pred = y_prev + delta_t if self.residual else delta_t
 
             if self.gate_y_prev:
-                gate_inputs = ext_features
+                gate_inputs = climate_only
                 g_raw = torch.sigmoid(self.gate_mlp(gate_inputs))
 
                 if self.clamp_gate_by_ceiling:

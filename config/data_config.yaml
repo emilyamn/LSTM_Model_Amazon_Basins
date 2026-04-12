@@ -1,9 +1,9 @@
 # ==========================================================
 # NOMENCLATURA DESCRITIVA DO EXPERIMENTO 
 # ==========================================================
-experiment_name: zeroinit_lowlr_warmup10
-description: climate_proj zero-init, LR=0.0005, scheduler patience=10, warmup 10 epochs, sem fluxo em climate_proj.
-model_name: model_zeroinit_lowlr
+experiment_name: decoder_no_flow
+description: Decoder LSTM, climate_proj e gate sem flow features. Flow history via encoder hidden state.
+model_name: model_decoder_no_flow
 
 # ==========================================================
 # CONFIGURAÇÕES DE ESTAÇÕES E ATRIBUTOS ESTÁTICOS
