@@ -1,9 +1,9 @@
 # ==========================================================
 # NOMENCLATURA DESCRITIVA DO EXPERIMENTO 
 # ==========================================================
-experiment_name: decoder_no_flow
-description: Decoder LSTM, climate_proj e gate sem flow features. Flow history via encoder hidden state.
-model_name: model_decoder_no_flow
+experiment_name: decoder_no_flow_fix
+description: Fix - n_decoder_flow_feats agora e passado ao modelo. Decoder LSTM, climate_proj e gate sem flow.
+model_name: model_decoder_no_flow_fix
 
 # ==========================================================
 # CONFIGURAÇÕES DE ESTAÇÕES E ATRIBUTOS ESTÁTICOS

@@ -142,6 +142,10 @@ class Seq2SeqHydro(nn.Module):
             nn.Linear(hidden_dim, n_stations),
         )
 
+        # Debug: confirmar dimensões
+        print(f"  decoder_lstm_dim={self.decoder_lstm_dim}, climate_feat_dim={climate_feat_dim}")
+        print(f"  n_decoder_flow_feats={n_decoder_flow_feats}")
+
         # Dropouts
         self.y_prev_dropout = nn.Dropout(p=y_prev_dropout_p)
         self.decoder_in_dropout = nn.Dropout(p=decoder_feat_dropout_p)
