@@ -132,18 +132,8 @@ class Seq2SeqHydro(nn.Module):
             nn.Linear(hidden_dim, n_stations),
         )
 
-        # Climate skip connection — caminho direto de features climáticas para delta_t
-        # Exclui features de fluxo (n_decoder_flow_feats) do input da climate_proj
-        climate_feat_dim = decoder_input_dim - n_stations - n_decoder_flow_feats
-        self.climate_proj = nn.Sequential(
-            nn.Linear(climate_feat_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim, n_stations),
-        )
-
         # Debug: confirmar dimensões
-        print(f"  decoder_lstm_dim={self.decoder_lstm_dim}, climate_feat_dim={climate_feat_dim}")
+        print(f"  decoder_lstm_dim={self.decoder_lstm_dim}")
         print(f"  n_decoder_flow_feats={n_decoder_flow_feats}")
 
         # Dropouts
@@ -229,10 +219,8 @@ class Seq2SeqHydro(nn.Module):
 
             dec_out_t = self.layernorm(dec_out_t.squeeze(1))
 
-            # Previsão: LSTM pathway + climate skip connection
-            delta_lstm = self.out_proj(dec_out_t)
-            delta_climate = self.climate_proj(climate_only)
-            delta_t = delta_lstm + delta_climate
+            # Previsão: LSTM pathway only (climate_proj removido — causava cancelamento)
+            delta_t = self.out_proj(dec_out_t)
             base_pred = y_prev + delta_t if self.residual else delta_t
 
             # Gate mechanism
@@ -307,8 +295,6 @@ class Seq2SeqHydro(nn.Module):
 
         # Diagnósticos
         diag = {
-            'delta_lstm': [],
-            'delta_climate': [],
             'delta_total': [],
             'gate': [],
             'y_prev': [],
@@ -335,9 +321,7 @@ class Seq2SeqHydro(nn.Module):
 
             dec_out_t = self.layernorm(dec_out_t.squeeze(1))
 
-            delta_lstm = self.out_proj(dec_out_t)
-            delta_climate = self.climate_proj(climate_only)
-            delta_t = delta_lstm + delta_climate
+            delta_t = self.out_proj(dec_out_t)
             base_pred = y_prev + delta_t if self.residual else delta_t
 
             if self.gate_y_prev:
@@ -361,8 +345,6 @@ class Seq2SeqHydro(nn.Module):
                 pred_t = F.relu(pred_t)
 
             # Capturar diagnósticos
-            diag['delta_lstm'].append(delta_lstm.detach())
-            diag['delta_climate'].append(delta_climate.detach())
             diag['delta_total'].append(delta_t.detach())
             diag['gate'].append(g.detach())
             diag['y_prev'].append(y_prev.detach())
