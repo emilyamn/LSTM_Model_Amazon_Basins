@@ -1,15 +1,15 @@
 # Arquitetura do modelo
 architecture:
-  hidden_dim: 256
-  num_layers: 3
-  dropout: 0.2
+  hidden_dim: 128
+  num_layers: 2
+  dropout: 0.3
   attention: true
   residual: true
   non_negative: false
 
 # Parâmetros do gate
 gate:
-  y_prev: true
+  y_prev: false
   from_inputs: true
   clamp_by_ceiling: false
   ceiling_min: 0.15
@@ -19,12 +19,12 @@ gate:
 
 # Regularização e dropout
 regularization:
-  input_noise_std: 0.05
+  input_noise_std: 0.03
   y_prev_dropout_p: 0.30
   y_prev_mask_p: 0.30
   y_prev_mask_step_gamma: 0.20
-  decoder_feat_dropout_p: 0.15
-  tf_step_decay: 0.15
+  decoder_feat_dropout_p: 0.10
+  tf_step_decay: 0.10
 
 # Outras configurações
 misc:

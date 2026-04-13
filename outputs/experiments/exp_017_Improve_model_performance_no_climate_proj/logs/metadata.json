@@ -1,0 +1,13 @@
+{
+  "exp_id": 17,
+  "branch_name": "Improve_model_performance",
+  "exp_name": "no_climate_proj",
+  "exp_dir": "C:\\Users\\emily\\Documents\\GitHub\\Mini-curso-GitHub-Leo\\outputs\\experiments\\exp_017_Improve_model_performance_no_climate_proj",
+  "created_at": "2026-04-13 09:02:57",
+  "description": "Removido climate_proj (causava cancelamento com out_proj). LSTM pathway unico. Flow excluido do decoder.",
+  "config_files": [
+    "data_config.yaml",
+    "model_config.yaml",
+    "training_config.yaml"
+  ]
+}

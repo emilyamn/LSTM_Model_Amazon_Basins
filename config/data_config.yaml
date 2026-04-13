@@ -1,9 +1,9 @@
 # ==========================================================
 # NOMENCLATURA DESCRITIVA DO EXPERIMENTO 
 # ==========================================================
-experiment_name: no_climate_proj
-description: Removido climate_proj (causava cancelamento com out_proj). LSTM pathway unico. Flow excluido do decoder.
-model_name: model_no_climate_proj
+experiment_name: simplified
+description: Modelo simplificado - hidden128, 2 layers, sem gate, sem climate_proj, TF alto, loss simples.
+model_name: model_simplified
 
 # ==========================================================
 # CONFIGURAÇÕES DE ESTAÇÕES E ATRIBUTOS ESTÁTICOS

@@ -1,5 +1,5 @@
 # Parâmetros de treino
-epochs: 50
+epochs: 80
 batch_size: 64
 learning_rate: 0.001
 weight_decay: 0.0001
@@ -7,20 +7,20 @@ clip_grad_norm: 3.0
 
 # Teacher forcing
 teacher_forcing:
-  initial: 0.25
-  decay: 0.88
+  initial: 0.50
+  decay: 0.96
   final: 0.0
-  free_run_tail: 0
-  early_free_run_patience: 3
+  free_run_tail: 5
+  early_free_run_patience: 12
 
 # Pesos da loss
 loss_weights:
   smooth: 0.0
   negative: 0.01
   continuity: 0.001
-  slope: 0.3
-  gate_bias: 0.3
-  direction: 1.0
+  slope: 0.1
+  gate_bias: 0.0
+  direction: 0.3
 
 # Pesos por horizonte
 horizon_weights:
@@ -37,10 +37,10 @@ gate_decay: 0.06
 
 # Early stopping
 early_stopping:
-  patience: 20
+  patience: 25
   min_delta: 0.0001
 
 # Scheduler
 scheduler:
-  patience: 6
-  factor: 0.7
+  patience: 8
+  factor: 0.5
