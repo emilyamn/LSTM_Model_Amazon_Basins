@@ -37,7 +37,7 @@ gate_decay: 0.06
 
 # Early stopping
 early_stopping:
-  patience: 15
+  patience: 25
   min_delta: 0.0001
 
 # Scheduler

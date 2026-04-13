@@ -1,0 +1,13 @@
+{
+  "exp_id": 18,
+  "branch_name": "Improve_model_performance",
+  "exp_name": "simplified",
+  "exp_dir": "C:\\Users\\emily\\Documents\\GitHub\\Mini-curso-GitHub-Leo\\outputs\\experiments\\exp_018_Improve_model_performance_simplified",
+  "created_at": "2026-04-13 11:10:58",
+  "description": "Modelo simplificado - hidden128, 2 layers, sem gate, sem climate_proj, TF alto, loss simples.",
+  "config_files": [
+    "data_config.yaml",
+    "model_config.yaml",
+    "training_config.yaml"
+  ]
+}
