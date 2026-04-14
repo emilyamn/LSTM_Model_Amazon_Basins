@@ -106,3 +106,53 @@ def load_checkpoint_legacy(path: str, device: str = "cpu") -> Tuple[Seq2SeqHydro
     model.eval()
 
     return model, checkpoint["inference_meta"]
+
+
+def load_checkpoint_legacy_with_climate(path: str, device: str = "cpu") -> Tuple[Seq2SeqHydro, Dict[str, Any]]:
+    """
+    Carrega checkpoints antigos que foram treinados COM climate_proj.
+
+    Detecta automaticamente se o checkpoint contém climate_proj e ativa o flag.
+    Também lida com n_decoder_flow_feats faltante.
+
+    Returns:
+        model: Modelo carregado (com climate_proj se presente) em modo eval()
+        inference_meta: Metadados (scalers, configs, etc.)
+    """
+    try:
+        with torch.serialization.safe_globals([Scaler]):
+            checkpoint = torch.load(path, map_location=device, weights_only=True)
+    except (AttributeError, TypeError, pickle.UnpicklingError, RuntimeError):
+        checkpoint = torch.load(path, map_location=device, weights_only=False)
+
+    config = checkpoint["model_config"]
+    state_dict = checkpoint["model_state_dict"]
+
+    # Garantir n_decoder_flow_feats
+    config.setdefault("n_decoder_flow_feats", 0)
+
+    # Detectar se checkpoint tem climate_proj
+    has_climate_proj = any(k.startswith("climate_proj.") for k in state_dict.keys())
+    config["use_climate_proj"] = has_climate_proj
+
+    model = Seq2SeqHydro(**config)
+
+    # Carregar pesos com tolerância
+    model_keys = set(model.state_dict().keys())
+    saved_keys = set(state_dict.keys())
+    extra = saved_keys - model_keys
+    missing = model_keys - saved_keys
+
+    if extra:
+        print(f"⚠️ Legacy: ignorando {len(extra)} chaves extras: {sorted(extra)[:5]}...")
+    if missing:
+        print(f"⚠️ Legacy: {len(missing)} chaves faltantes: {sorted(missing)[:5]}...")
+
+    model.load_state_dict(state_dict, strict=False)
+    model.to(device)
+    model.eval()
+
+    tag = "COM climate_proj" if has_climate_proj else "SEM climate_proj"
+    print(f"✅ Modelo legacy carregado ({tag})")
+
+    return model, checkpoint["inference_meta"]

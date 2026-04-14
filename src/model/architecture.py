@@ -41,6 +41,7 @@ class Seq2SeqHydro(nn.Module):
         gate_min: float = 0.0,
         gate_max: float = 0.60,
         n_decoder_flow_feats: int = 0,
+        use_climate_proj: bool = False,
     ):
         """
         Inicializa o modelo Seq2SeqHydro.
@@ -90,6 +91,7 @@ class Seq2SeqHydro(nn.Module):
         self.gate_min = gate_min
         self.gate_max = gate_max
         self.n_decoder_flow_feats = n_decoder_flow_feats
+        self.use_climate_proj = use_climate_proj
 
         # Encoder LSTM
         self.encoder = nn.LSTM(
@@ -132,9 +134,20 @@ class Seq2SeqHydro(nn.Module):
             nn.Linear(hidden_dim, n_stations),
         )
 
+        # Climate skip connection (opcional — mantido para compatibilidade com checkpoints antigos)
+        if use_climate_proj:
+            climate_feat_dim = decoder_input_dim - n_stations - n_decoder_flow_feats
+            self.climate_proj = nn.Sequential(
+                nn.Linear(climate_feat_dim, hidden_dim),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.Linear(hidden_dim, n_stations),
+            )
+
         # Debug: confirmar dimensões
         print(f"  decoder_lstm_dim={self.decoder_lstm_dim}")
         print(f"  n_decoder_flow_feats={n_decoder_flow_feats}")
+        print(f"  use_climate_proj={use_climate_proj}")
 
         # Dropouts
         self.y_prev_dropout = nn.Dropout(p=y_prev_dropout_p)
@@ -219,8 +232,10 @@ class Seq2SeqHydro(nn.Module):
 
             dec_out_t = self.layernorm(dec_out_t.squeeze(1))
 
-            # Previsão: LSTM pathway only (climate_proj removido — causava cancelamento)
+            # Previsão
             delta_t = self.out_proj(dec_out_t)
+            if self.use_climate_proj:
+                delta_t = delta_t + self.climate_proj(climate_only)
             base_pred = y_prev + delta_t if self.residual else delta_t
 
             # Gate mechanism
@@ -322,6 +337,8 @@ class Seq2SeqHydro(nn.Module):
             dec_out_t = self.layernorm(dec_out_t.squeeze(1))
 
             delta_t = self.out_proj(dec_out_t)
+            if self.use_climate_proj:
+                delta_t = delta_t + self.climate_proj(climate_only)
             base_pred = y_prev + delta_t if self.residual else delta_t
 
             if self.gate_y_prev:

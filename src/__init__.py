@@ -60,7 +60,8 @@ from .utils.time_utils import (
 from .utils.serialization import (
     save_checkpoint,
     load_checkpoint,
-    load_checkpoint_legacy
+    load_checkpoint_legacy,
+    load_checkpoint_legacy_with_climate
 )
 
 from .utils.experiment_utils import (
