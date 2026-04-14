@@ -2,7 +2,7 @@
 # NOMENCLATURA DESCRITIVA DO EXPERIMENTO 
 # ==========================================================
 experiment_name: revert_fix_scheduler
-description: description="Revert config exp16 (hidden256, 3L, gate). Fix: scheduler usa config, mask passada para loss."
+description: description="Revert config exp16 (hidden256, 3L, gate). Fix scheduler usa config, mask passada para loss."
 model_name: model_revert_fix_scheduler
 
 # ==========================================================

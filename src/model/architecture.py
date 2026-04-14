@@ -276,7 +276,12 @@ class Seq2SeqHydro(nn.Module):
         preds = torch.cat(preds, dim=1)
         g_seq = torch.cat(g_steps, dim=1) if len(g_steps) > 0 else None
 
-        return preds, sample.mask_dec[:, decoder_history:, :], g_seq
+        # Reduzir mask de n_flow_cols para n_stations (mask foi expandida por repeat)
+        mask_horizon = sample.mask_dec[:, decoder_history:, :]
+        if mask_horizon.shape[-1] != self.n_stations:
+            step = mask_horizon.shape[-1] // self.n_stations
+            mask_horizon = mask_horizon[:, :, ::step]
+        return preds, mask_horizon, g_seq
 
     @torch.no_grad()
     def diagnostic_forward(
