@@ -1,9 +1,9 @@
 # ==========================================================
 # NOMENCLATURA DESCRITIVA DO EXPERIMENTO 
 # ==========================================================
-experiment_name: revert_fix_scheduler
-description: description="Revert config exp16 (hidden256, 3L, gate). Fix scheduler usa config, mask passada para loss."
-model_name: model_revert_fix_scheduler.pth
+experiment_name: improve_direction_loss
+description: direction loss aprimorado (penaliza persistencia), slope com horizon weights, gate range [0.02, 0.25], gate_target=0.10, TF=0.50/0.94, LR=0.0005, slope=1.0, direction=0.8, gamma=0.10, early_free_run_patience=15
+model_name: improve_direction_loss.pth
 
 # ==========================================================
 # CONFIGURAÇÕES DE ESTAÇÕES E ATRIBUTOS ESTÁTICOS
