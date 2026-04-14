@@ -14,8 +14,8 @@ gate:
   clamp_by_ceiling: false
   ceiling_min: 0.15
   detach_y_prev: true
-  min: 0.10
-  max: 0.35
+  min: 0.02
+  max: 0.25
 
 # Regularização e dropout
 regularization:
@@ -24,7 +24,7 @@ regularization:
   y_prev_mask_p: 0.30
   y_prev_mask_step_gamma: 0.20
   decoder_feat_dropout_p: 0.15
-  tf_step_decay: 0.15
+  tf_step_decay: 0.10
 
 # Outras configurações
 misc:
