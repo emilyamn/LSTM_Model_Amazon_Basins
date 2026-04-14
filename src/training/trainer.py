@@ -39,6 +39,8 @@ def train_model(
     learning_rate: float = 1e-3,
     weight_decay: float = 1e-4,
     clip_grad_norm: float = 3.0,
+    scheduler_patience: int = 6,
+    scheduler_factor: float = 0.7,
     device: str = "cuda" if torch.cuda.is_available() else "cpu",
 ) -> torch.nn.Module:
     """
@@ -79,7 +81,7 @@ def train_model(
     """
     model = model.to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=6, factor=0.7)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=scheduler_patience, factor=scheduler_factor)
 
     # Configurar free run tail
     free_run_tail = max(0, min(free_run_tail, max_epochs - 1))
@@ -126,7 +128,7 @@ def train_model(
         for batch in train_loader:
             batch = move_sample_to_device(batch, device)
 
-            preds, _, g_seq = model(batch, tf_ratio, decoder_history, decoder_horizon)
+            preds, mask, g_seq = model(batch, tf_ratio, decoder_history, decoder_horizon)
 
             loss = multi_step_loss(
                 preds,
@@ -143,7 +145,8 @@ def train_model(
                 lambda_direction=lambda_direction_epoch,
                 direction_start=direction_start,
                 dir_weight_gamma=dir_weight_gamma,
-                lambda_slope=lambda_slope_epoch
+                lambda_slope=lambda_slope_epoch,
+                mask=mask,
             )
 
             optimizer.zero_grad()
@@ -161,7 +164,7 @@ def train_model(
         with torch.no_grad():
             for batch in val_loader:
                 batch = move_sample_to_device(batch, device)
-                preds, _, g_seq = model(batch, 0.0, decoder_history, decoder_horizon)
+                preds, mask, g_seq = model(batch, 0.0, decoder_history, decoder_horizon)
 
                 loss = multi_step_loss(
                     preds,
@@ -178,7 +181,8 @@ def train_model(
                     lambda_direction=lambda_direction_epoch,
                     direction_start=direction_start,
                     dir_weight_gamma=dir_weight_gamma,
-                    lambda_slope=lambda_slope_epoch
+                    lambda_slope=lambda_slope_epoch,
+                    mask=mask,
                 )
                 val_losses.append(loss.item())
 

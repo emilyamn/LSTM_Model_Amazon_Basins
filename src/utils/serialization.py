@@ -128,12 +128,22 @@ def load_checkpoint_legacy_with_climate(path: str, device: str = "cpu") -> Tuple
     config = checkpoint["model_config"]
     state_dict = checkpoint["model_state_dict"]
 
-    # Garantir n_decoder_flow_feats
-    config.setdefault("n_decoder_flow_feats", 0)
-
     # Detectar se checkpoint tem climate_proj
     has_climate_proj = any(k.startswith("climate_proj.") for k in state_dict.keys())
     config["use_climate_proj"] = has_climate_proj
+
+    # Detectar decoder_lstm_dim real a partir dos pesos salvos
+    # decoder.weight_ih_l0 tem shape (4*hidden_dim, decoder_lstm_dim)
+    if "decoder.weight_ih_l0" in state_dict:
+        actual_decoder_lstm_dim = state_dict["decoder.weight_ih_l0"].shape[1]
+        # n_decoder_flow_feats = decoder_input_dim - n_stations - decoder_lstm_dim
+        n_stations = config.get("n_stations", config.get("encoder_input_dim", 0))
+        decoder_input_dim = config.get("decoder_input_dim", 0)
+        inferred_flow_feats = decoder_input_dim - n_stations - actual_decoder_lstm_dim
+        config["n_decoder_flow_feats"] = max(0, inferred_flow_feats)
+        print(f"🔍 Detectado: decoder_lstm_dim={actual_decoder_lstm_dim}, n_decoder_flow_feats={config['n_decoder_flow_feats']}")
+    else:
+        config.setdefault("n_decoder_flow_feats", 0)
 
     model = Seq2SeqHydro(**config)
 
