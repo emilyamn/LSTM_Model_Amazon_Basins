@@ -201,11 +201,12 @@ class HydroDataset(Dataset):
 
     def _build_flow_block(
         self, center: int, stage: str
-    ) -> Tuple[List[np.ndarray], List[np.ndarray]]:
+    ) -> Tuple[List[np.ndarray], List[np.ndarray], List[int]]:
         global_offsets = self.encoder_offsets if stage == "encoder" else self.decoder_offsets
         flow_arrays, mask_arrays = [], []
+        station_indices: List[int] = []
 
-        for station in self.stations:
+        for st_idx, station in enumerate(self.stations):
             for spec in self.flow_window_config[station][stage]:
                 spec_offsets = np.arange(spec["start"], spec["end"] + 1)
                 raw_values = self._slice_series(
@@ -235,8 +236,9 @@ class HydroDataset(Dataset):
 
                 flow_arrays.append(norm_values)
                 mask_arrays.append(aligned_mask)
+                station_indices.append(st_idx)
 
-        return flow_arrays, mask_arrays
+        return flow_arrays, mask_arrays, station_indices
 
     def _build_climate_block(
         self, center: int, stage: str
@@ -384,8 +386,8 @@ class HydroDataset(Dataset):
     def __getitem__(self, idx):
         center = self.valid_centers[idx]
 
-        flow_enc, mask_enc = self._build_flow_block(center, "encoder")
-        flow_dec, mask_dec = self._build_flow_block(center, "decoder")
+        flow_enc, mask_enc, _ = self._build_flow_block(center, "encoder")
+        flow_dec, mask_dec, dec_station_indices = self._build_flow_block(center, "decoder")
 
         climate_enc, _ = self._build_climate_block(center, "encoder")
         climate_dec, _ = self._build_climate_block(center, "decoder")
@@ -399,17 +401,23 @@ class HydroDataset(Dataset):
         decoder_dyn = np.stack(flow_dec + climate_dec, axis=-1)
 
         mask_enc_arr = np.stack(mask_enc, axis=-1)
-        mask_dec_history = np.stack(mask_dec, axis=-1)  # (decoder_length, n_flow_cols)
+        mask_dec_history_full = np.stack(mask_dec, axis=-1)  # (decoder_length, n_flow_cols)
 
-        # Expandir target_mask para ter o mesmo número de colunas que mask_dec_history
-        n_flow_cols = mask_dec_history.shape[1]
-        n_stations  = target_mask.shape[1]
-        reps = n_flow_cols // n_stations
-        target_mask_expanded = np.repeat(target_mask, reps, axis=1)
+        # Reduzir mask de n_flow_cols → n_stations usando mapeamento real
+        # Para cada estação: mask = min das masks de todos os seus specs
+        n_stations = len(self.stations)
+        mask_dec_history = np.ones(
+            (self.decoder_history, n_stations), dtype=np.float32
+        )
+        for col_idx, st_idx in enumerate(dec_station_indices):
+            mask_dec_history[:, st_idx] = np.minimum(
+                mask_dec_history[:, st_idx],
+                mask_dec_history_full[:self.decoder_history, col_idx],
+            )
 
         full_mask_dec = np.concatenate([
-            mask_dec_history[:self.decoder_history, :],  # parte histórica
-            target_mask_expanded,                         # horizonte
+            mask_dec_history,   # (decoder_history, n_stations)
+            target_mask,        # (decoder_horizon, n_stations)
         ], axis=0)
 
         # baseline_last: último valor observado de cada estação (antes do horizonte)

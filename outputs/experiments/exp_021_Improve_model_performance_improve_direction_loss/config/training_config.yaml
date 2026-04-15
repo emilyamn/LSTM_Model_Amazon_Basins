@@ -1,0 +1,47 @@
+# Parâmetros de treino
+epochs: 80
+batch_size: 64
+learning_rate: 0.0005
+weight_decay: 0.0001
+clip_grad_norm: 3.0
+
+# Teacher forcing
+teacher_forcing:
+  initial: 0.50
+  decay: 0.94
+  final: 0.0
+  free_run_tail: 5
+  early_free_run_patience: 15
+
+# Pesos da loss
+loss_weights:
+  smooth: 0.0
+  negative: 0.01
+  continuity: 0.001
+  slope: 1.0
+  gate_bias: 0.05
+  direction: 0.8
+  direction_start: 0
+
+# Pesos por horizonte
+horizon_weights:
+  mode: "increasing"
+  gamma: 0.10
+
+# Parâmetros de direção
+direction:
+  start: 0
+  weight_gamma: 0.05
+
+# Gate decay
+gate_decay: 0.06
+
+# Early stopping
+early_stopping:
+  patience: 25
+  min_delta: 0.0001
+
+# Scheduler
+scheduler:
+  patience: 6
+  factor: 0.7
