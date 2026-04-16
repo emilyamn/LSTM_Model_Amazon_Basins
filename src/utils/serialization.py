@@ -53,6 +53,15 @@ def load_checkpoint(path: str, device: str = "cpu") -> Tuple[Seq2SeqHydro, Dict[
 
     # Reconstruir arquitetura
     config = checkpoint["model_config"]
+
+    # Remover chaves que o modelo atual não aceita
+    import inspect
+    valid_params = set(inspect.signature(Seq2SeqHydro.__init__).parameters.keys()) - {"self"}
+    extra_keys = set(config.keys()) - valid_params
+    if extra_keys:
+        print(f"⚠️ Removendo parâmetros não suportados pelo modelo atual: {sorted(extra_keys)}")
+        config = {k: v for k, v in config.items() if k in valid_params}
+
     model = Seq2SeqHydro(**config)
 
     # Carregar pesos
@@ -83,8 +92,13 @@ def load_checkpoint_legacy(path: str, device: str = "cpu") -> Tuple[Seq2SeqHydro
 
     config = checkpoint["model_config"]
 
-    # Garantir que n_decoder_flow_feats existe (checkpoints antigos não têm)
-    config.setdefault("n_decoder_flow_feats", 0)
+    # Remover chaves que o modelo atual não aceita (ex: checkpoints mais novos carregados com arquitetura antiga)
+    import inspect
+    valid_params = set(inspect.signature(Seq2SeqHydro.__init__).parameters.keys()) - {"self"}
+    extra_keys = set(config.keys()) - valid_params
+    if extra_keys:
+        print(f"⚠️ Legacy: removendo parâmetros não suportados pelo modelo atual: {sorted(extra_keys)}")
+        config = {k: v for k, v in config.items() if k in valid_params}
 
     model = Seq2SeqHydro(**config)
 
@@ -144,6 +158,14 @@ def load_checkpoint_legacy_with_climate(path: str, device: str = "cpu") -> Tuple
         print(f"🔍 Detectado: decoder_lstm_dim={actual_decoder_lstm_dim}, n_decoder_flow_feats={config['n_decoder_flow_feats']}")
     else:
         config.setdefault("n_decoder_flow_feats", 0)
+
+    # Remover chaves que o modelo atual não aceita
+    import inspect
+    valid_params = set(inspect.signature(Seq2SeqHydro.__init__).parameters.keys()) - {"self"}
+    extra_cfg_keys = set(config.keys()) - valid_params
+    if extra_cfg_keys:
+        print(f"⚠️ Legacy: removendo parâmetros não suportados pelo modelo atual: {sorted(extra_cfg_keys)}")
+        config = {k: v for k, v in config.items() if k in valid_params}
 
     model = Seq2SeqHydro(**config)
 
