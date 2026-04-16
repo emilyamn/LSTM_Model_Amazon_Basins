@@ -20,7 +20,7 @@ def multi_step_loss(
     g_seq: Optional[torch.Tensor] = None,
     lambda_gate_bias: float = 0.01,
     gate_decay: float = 0.12,
-    gate_target: float = 0.10,
+    gate_target: float = 0.30,
     lambda_direction: float = 0.02,
     direction_start: int = 5,
     dir_weight_gamma: float = 0.05,
@@ -69,8 +69,7 @@ def multi_step_loss(
         slope_pred = preds[:, 1:, :] - preds[:, :-1, :]
         slope_true = target[:, 1:, :] - target[:, :-1, :]
         slope_mask = mask[:, 1:, :] * mask[:, :-1, :]
-        slope_weights = weights[1:].view(1, -1, 1)
-        slope_loss = (torch.abs(slope_pred - slope_true) * slope_mask * slope_weights).sum() / (slope_mask.sum() + eps)
+        slope_loss = (torch.abs(slope_pred - slope_true) * slope_mask).sum() / (slope_mask.sum() + eps)
     else:
         slope_loss = preds.new_tensor(0.0)
 
@@ -96,8 +95,7 @@ def multi_step_loss(
         dp = preds[:, 1:, :] - preds[:, :-1, :]
         dt = target[:, 1:, :] - target[:, :-1, :]
         m2 = mask[:, 1:, :] * mask[:, :-1, :]
-        sign_dt = torch.sign(dt)
-        dir_term = F.relu(torch.abs(dt) - dp * sign_dt) / (torch.abs(dt) + eps)
+        dir_term = F.relu(-(dp * dt)) / (torch.abs(dt) + eps)
         t_idx2 = torch.arange(dp.size(1), device=preds.device).view(1, -1, 1)
         w_dir = torch.exp(dir_weight_gamma * t_idx2) * (t_idx2 >= direction_start).float()
         direction_penalty = (dir_term * m2 * w_dir).sum() / (m2.sum() + eps)

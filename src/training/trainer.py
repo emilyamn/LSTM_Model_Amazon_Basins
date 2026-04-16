@@ -39,8 +39,6 @@ def train_model(
     learning_rate: float = 1e-3,
     weight_decay: float = 1e-4,
     clip_grad_norm: float = 3.0,
-    scheduler_patience: int = 6,
-    scheduler_factor: float = 0.7,
     device: str = "cuda" if torch.cuda.is_available() else "cpu",
 ) -> torch.nn.Module:
     """
@@ -81,7 +79,7 @@ def train_model(
     """
     model = model.to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=scheduler_patience, factor=scheduler_factor)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=6, factor=0.7)
 
     # Configurar free run tail
     free_run_tail = max(0, min(free_run_tail, max_epochs - 1))
@@ -116,10 +114,14 @@ def train_model(
         # Reduzir continuidade com o tempo
         lambda_cont_epoch = lambda_continuity * (0.95 ** (epoch - 1))
 
-        # Direction/slope sem warmup — pesos constantes
-        lambda_direction_epoch = lambda_direction
-        lambda_slope_epoch = lambda_slope
-        warmup_mult = 1.0
+        # Warmup de direction/slope: peso 2x nas primeiras 5 epochs, depois decai para 1x
+        warmup_epochs = 5
+        if epoch <= warmup_epochs:
+            warmup_mult = 2.0
+        else:
+            warmup_mult = max(1.0, 2.0 * (0.85 ** (epoch - warmup_epochs)))
+        lambda_direction_epoch = lambda_direction * warmup_mult
+        lambda_slope_epoch = lambda_slope * warmup_mult
 
         # Treino
         model.train()
@@ -128,7 +130,7 @@ def train_model(
         for batch in train_loader:
             batch = move_sample_to_device(batch, device)
 
-            preds, mask, g_seq = model(batch, tf_ratio, decoder_history, decoder_horizon)
+            preds, _, g_seq = model(batch, tf_ratio, decoder_history, decoder_horizon)
 
             loss = multi_step_loss(
                 preds,
@@ -145,8 +147,7 @@ def train_model(
                 lambda_direction=lambda_direction_epoch,
                 direction_start=direction_start,
                 dir_weight_gamma=dir_weight_gamma,
-                lambda_slope=lambda_slope_epoch,
-                mask=mask,
+                lambda_slope=lambda_slope_epoch
             )
 
             optimizer.zero_grad()
@@ -164,7 +165,7 @@ def train_model(
         with torch.no_grad():
             for batch in val_loader:
                 batch = move_sample_to_device(batch, device)
-                preds, mask, g_seq = model(batch, 0.0, decoder_history, decoder_horizon)
+                preds, _, g_seq = model(batch, 0.0, decoder_history, decoder_horizon)
 
                 loss = multi_step_loss(
                     preds,
@@ -181,8 +182,7 @@ def train_model(
                     lambda_direction=lambda_direction_epoch,
                     direction_start=direction_start,
                     dir_weight_gamma=dir_weight_gamma,
-                    lambda_slope=lambda_slope_epoch,
-                    mask=mask,
+                    lambda_slope=lambda_slope_epoch
                 )
                 val_losses.append(loss.item())
 
