@@ -40,6 +40,7 @@ class Seq2SeqHydro(nn.Module):
         y_prev_mask_step_gamma: float = 0.20,
         gate_min: float = 0.0,
         gate_max: float = 0.60,
+        use_climate_proj: bool = True,
     ):
         """
         Inicializa o modelo Seq2SeqHydro.
@@ -88,6 +89,7 @@ class Seq2SeqHydro(nn.Module):
         self.gate_from_inputs = gate_from_inputs
         self.gate_min = gate_min
         self.gate_max = gate_max
+        self.use_climate_proj = use_climate_proj
 
         # Encoder LSTM
         self.encoder = nn.LSTM(
@@ -131,13 +133,14 @@ class Seq2SeqHydro(nn.Module):
         )
 
         # Climate skip connection — caminho direto de features climáticas para delta_t
-        climate_feat_dim = decoder_input_dim - n_stations
-        self.climate_proj = nn.Sequential(
-            nn.Linear(climate_feat_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim, n_stations),
-        )
+        if use_climate_proj:
+            climate_feat_dim = decoder_input_dim - n_stations
+            self.climate_proj = nn.Sequential(
+                nn.Linear(climate_feat_dim, hidden_dim),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.Linear(hidden_dim, n_stations),
+            )
 
         # Dropouts
         self.y_prev_dropout = nn.Dropout(p=y_prev_dropout_p)
@@ -220,10 +223,13 @@ class Seq2SeqHydro(nn.Module):
 
             dec_out_t = self.layernorm(dec_out_t.squeeze(1))
 
-            # Previsão: LSTM pathway + climate skip connection
+            # Previsão: LSTM pathway (+ climate skip connection se ativo)
             delta_lstm = self.out_proj(dec_out_t)
-            delta_climate = self.climate_proj(ext_features)
-            delta_t = delta_lstm + delta_climate
+            if self.use_climate_proj:
+                delta_climate = self.climate_proj(ext_features)
+                delta_t = delta_lstm + delta_climate
+            else:
+                delta_t = delta_lstm
             base_pred = y_prev + delta_t if self.residual else delta_t
 
             # Gate mechanism
@@ -326,8 +332,12 @@ class Seq2SeqHydro(nn.Module):
             dec_out_t = self.layernorm(dec_out_t.squeeze(1))
 
             delta_lstm = self.out_proj(dec_out_t)
-            delta_climate = self.climate_proj(ext_features)
-            delta_t = delta_lstm + delta_climate
+            if self.use_climate_proj:
+                delta_climate = self.climate_proj(ext_features)
+                delta_t = delta_lstm + delta_climate
+            else:
+                delta_climate = torch.zeros_like(delta_lstm)
+                delta_t = delta_lstm
             base_pred = y_prev + delta_t if self.residual else delta_t
 
             if self.gate_y_prev:

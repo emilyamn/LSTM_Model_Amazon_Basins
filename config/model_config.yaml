@@ -6,6 +6,7 @@ architecture:
   attention: true
   residual: true
   non_negative: false
+  use_climate_proj: false
 
 # Parâmetros do gate
 gate:

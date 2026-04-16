@@ -1,9 +1,9 @@
 # ==========================================================
 # NOMENCLATURA DESCRITIVA DO EXPERIMENTO 
 # ==========================================================
-experiment_name: restoring_arch_loss_trainer_from_exp11
-description: restoring architecture loss e trainer from_exp11
-model_name: model_arch_loss_trainer_from_exp11.pth
+experiment_name: exp_22_without_climate_proj
+description: fazer comparativo direto com experimento 22 retirando delta_clim
+model_name: exp_22_without_climate_proj.pth
 
 # ==========================================================
 # CONFIGURAÇÕES DE ESTAÇÕES E ATRIBUTOS ESTÁTICOS
