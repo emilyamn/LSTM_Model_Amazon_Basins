@@ -291,6 +291,61 @@ def merge_configs(config_paths: Dict[str, Path]) -> Dict[str, Any]:
     return merged
 
 
+def _update_summary_xlsx(
+    exp_id: int,
+    experiment_name: str,
+    description: str,
+    model_name: str,
+) -> None:
+    """
+    Adiciona uma nova linha na sheet 'all_experiments' do summary.xlsx.
+
+    Lê o arquivo, encontra a última linha preenchida na coluna A (ID),
+    e insere a nova entrada logo abaixo.
+    """
+    try:
+        import openpyxl
+    except ImportError:
+        print("⚠️ openpyxl não instalado — summary.xlsx não atualizado")
+        return
+
+    summary_path = get_project_root() / "outputs" / "summary.xlsx"
+    if not summary_path.exists():
+        print(f"⚠️ summary.xlsx não encontrado em {summary_path} — pulando")
+        return
+
+    try:
+        wb = openpyxl.load_workbook(summary_path)
+
+        if "all_experiments" not in wb.sheetnames:
+            print("⚠️ Sheet 'all_experiments' não encontrada — pulando")
+            wb.close()
+            return
+
+        ws = wb["all_experiments"]
+
+        # Encontrar última linha com dados na coluna A (ID)
+        last_row = 1
+        for row in ws.iter_rows(min_col=1, max_col=1):
+            for cell in row:
+                if cell.value is not None:
+                    last_row = cell.row
+
+        new_row = last_row + 1
+
+        # Escrever nova linha (colunas A, C, D, E baseado na estrutura existente)
+        ws.cell(row=new_row, column=1, value=exp_id)          # A: ID
+        ws.cell(row=new_row, column=3, value=experiment_name)  # C: Experiment name
+        ws.cell(row=new_row, column=4, value=description)      # D: Description
+        ws.cell(row=new_row, column=5, value=model_name)       # E: Model name
+
+        wb.save(summary_path)
+        wb.close()
+        print(f"✓ summary.xlsx atualizado (ID={exp_id})")
+    except Exception as e:
+        print(f"⚠️ Erro ao atualizar summary.xlsx: {e}")
+
+
 def create_experiment(
     config_paths: Dict[str, Path],
     experiment_name: str,
@@ -427,6 +482,17 @@ Configuration Files:
     with open(metadata_path, 'w', encoding='utf-8') as f:
         json.dump(metadata, f, indent=2)
     print("✓ Criado: logs/metadata.json")
+
+    # Atualizar summary.xlsx
+    model_name = ""
+    if "data" in resolved_paths:
+        try:
+            with open(resolved_paths["data"], 'r', encoding='utf-8') as f:
+                data_cfg = yaml.safe_load(f)
+            model_name = data_cfg.get("model_name", "")
+        except Exception:
+            pass
+    _update_summary_xlsx(exp_id, experiment_name, description, model_name)
 
     print("✅ EXPERIMENTO CRIADO COM SUCESSO")
     print(f"📁 Path: {exp_path}")
