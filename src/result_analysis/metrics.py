@@ -3,12 +3,66 @@ Módulo para cálculo de métricas de desempenho do modelo.
 """
 
 from typing import Dict, Any, Optional, Sequence, List, Union
+from pathlib import Path
 import numpy as np
 import pandas as pd
 import json
-from pathlib import Path
 
-    
+
+# ===========================================================================
+# HELPER COMPARTILHADO
+# ===========================================================================
+
+def _resolve_save_dir(
+    subdir: str = "raw",
+    mode: str = "test",
+    path: Optional[str] = None,
+) -> Path:
+    """
+    Resolve o diretório de salvamento para métricas.
+
+    Prioridade:
+      1. ``path`` fornecido explicitamente.
+      2. Último experimento em ``outputs/experiments/`` →
+         ``predictions_{mode}/{subdir}/``.
+      3. Fallback: ``outputs/{subdir}/``.
+
+    Args:
+        subdir: Subpasta dentro do modo ("raw" ou "metrics").
+        mode:   "test" ou "operational".
+        path:   Caminho absoluto customizado (ignora mode/subdir).
+
+    Returns:
+        Path do diretório (já criado).
+    """
+    if path is not None:
+        p = Path(path)
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+
+    from src.utils.experiment_utils import get_experiments_base_dir
+    experiments_root = get_experiments_base_dir()
+
+    if experiments_root.exists():
+        experiment_dirs = sorted(
+            [d for d in experiments_root.iterdir() if d.is_dir()],
+            key=lambda d: d.stat().st_mtime,
+            reverse=True,
+        )
+        if experiment_dirs:
+            target = experiment_dirs[0] / f"predictions_{mode}" / subdir
+            target.mkdir(parents=True, exist_ok=True)
+            return target
+
+    fallback = Path("outputs") / subdir
+    fallback.mkdir(parents=True, exist_ok=True)
+    return fallback
+
+
+# ===========================================================================
+# FUNÇÕES DE MÉTRICAS
+# ===========================================================================
+
 def compute_flow_metrics(
     preds: np.ndarray,
     obs: np.ndarray,
@@ -16,8 +70,33 @@ def compute_flow_metrics(
     baseline_last: Optional[np.ndarray] = None,
     horizon_weights: Optional[np.ndarray] = None,
     eps: float = 1e-6,
+    save: bool = True,
+    mode: str = "test",
+    path: Optional[str] = None,
+    filename_base: str = "metrics",
+    save_json: bool = True,
+    save_csv: bool = True,
 ) -> Dict[int, Dict[str, Any]]:
-    """Calcula métricas de desempenho por estação."""
+    """
+    Calcula métricas de desempenho por estação e salva automaticamente.
+
+    Args:
+        preds:          Previsões, shape (batch, horizon, n_stations).
+        obs:            Observações, shape (batch, horizon, n_stations).
+        stations:       Lista de IDs das estações.
+        baseline_last:  Baseline de persistência, shape (batch, n_stations).
+        horizon_weights: Pesos por horizonte.
+        eps:            Epsilon para evitar divisão por zero.
+        save:           Se True, salva métricas em JSON/CSV.
+        mode:           "test" ou "operational".
+        path:           Caminho customizado. Se None, usa o último experimento.
+        filename_base:  Prefixo dos arquivos salvos.
+        save_json:      Se True, salva JSON (quando save=True).
+        save_csv:       Se True, salva CSV (quando save=True).
+
+    Returns:
+        Dicionário {station: metrics}.
+    """
     B, T, S = preds.shape
 
     if horizon_weights is None:
@@ -67,13 +146,13 @@ def compute_flow_metrics(
             base_flat = baseline[mask]
             rmse_base = float(np.sqrt(np.mean((base_flat - y_true_flat)**2)))
             skill_rmse_overall = float(1.0 - rmse_overall / (rmse_base + eps))
-            
+
             # Skill RMSE para horizonte 1 (D+1)
             if T >= 1:
                 y_true_h1 = y_true[:, 0][~np.isnan(y_true[:, 0])]
                 pred_h1 = y_pred[:, 0][~np.isnan(y_true[:, 0])]
                 base_h1 = base_vec[:len(y_true_h1)]
-                
+
                 if len(y_true_h1) > 0:
                     rmse_h1 = float(np.sqrt(np.mean((pred_h1 - y_true_h1)**2)))
                     rmse_base_h1 = float(np.sqrt(np.mean((base_h1 - y_true_h1)**2)))
@@ -150,6 +229,10 @@ def compute_flow_metrics(
             },
         }
 
+    # Salvamento automático
+    if save:
+        _save_metrics_files(metrics, filename_base, mode, path, save_json, save_csv)
+
     return metrics
 
 
@@ -161,28 +244,42 @@ def compute_metrics_by_event_type(
     baseline_last: Optional[np.ndarray] = None,
     horizon_weights: Optional[np.ndarray] = None,
     eps: float = 1e-6,
+    save: bool = True,
+    mode: str = "test",
+    path: Optional[str] = None,
+    filename_base: str = "metrics_by_event",
+    save_json: bool = True,
+    save_csv: bool = True,
 ) -> Dict[str, Dict[int, Dict[str, Any]]]:
     """
-    Calcula métricas separadas por tipo de evento.
-    
+    Calcula métricas separadas por tipo de evento e salva automaticamente.
+
     window_indices pode ser:
       - Dict {event_type: {station: [indices]}} (padrão do analyze_flow_extremes)
       - List[int] ou np.ndarray (índices simples para todas as estações)
+
+    Args:
+        save:          Se True, salva métricas em JSON/CSV.
+        mode:          "test" ou "operational".
+        path:          Caminho customizado. Se None, usa o último experimento.
+        filename_base: Prefixo dos arquivos salvos.
+        save_json:     Se True, salva JSON (quando save=True).
+        save_csv:      Se True, salva CSV (quando save=True).
     """
     metrics_by_type = {}
-    
-    # ← NOVO: Tratamento de lista simples (índices de janelas)
+
+    # Tratamento de lista simples (índices de janelas)
     if isinstance(window_indices, (list, np.ndarray)):
         indices_list = list(window_indices)
         window_indices = {'all': {station: indices_list for station in stations}}
-    
+
     # Verificar se é dicionário válido
     if not isinstance(window_indices, dict):
         raise ValueError(
             f"window_indices deve ser dict, list ou np.ndarray. "
             f"Recebido: {type(window_indices)}"
         )
-    
+
     # Processar cada tipo de evento
     for event_type, indices_dict in window_indices.items():
         print(f"🔍 Calculando métricas para eventos: {event_type.upper()}")
@@ -205,9 +302,9 @@ def compute_metrics_by_event_type(
                 print(f"  ⚠️  Estação {station}: 0 janelas, pulando")
                 continue
 
-            # ← NOVO: Filtrar índices válidos (dentro do range)
+            # Filtrar índices válidos (dentro do range)
             valid_indices = [i for i in indices if 0 <= i < preds.shape[0]]
-            
+
             if len(valid_indices) == 0:
                 print(f"  ⚠️  Estação {station}: nenhum índice válido, pulando")
                 continue
@@ -225,7 +322,8 @@ def compute_metrics_by_event_type(
                 stations=[station],
                 baseline_last=baseline_filtered,
                 horizon_weights=horizon_weights,
-                eps=eps
+                eps=eps,
+                save=False,  # Não salvar individualmente
             )
 
             station_metrics[station]['n_windows'] = len(valid_indices)
@@ -234,40 +332,38 @@ def compute_metrics_by_event_type(
 
         metrics_by_type[event_type] = event_metrics
 
+    # Salvamento automático do resultado agregado
+    if save:
+        _save_metrics_files(metrics_by_type, filename_base, mode, path, save_json, save_csv)
+
     return metrics_by_type
 
 
-def save_metrics(
+# ===========================================================================
+# SALVAMENTO INTERNO
+# ===========================================================================
+
+def _save_metrics_files(
     metrics: Dict[str, Any],
-    experiment_name: str,
-    filename_base: str = "metrics",
-    base_dir: Optional[str] = None,
-    save_json: bool = True,
-    save_csv: bool = True,
+    filename_base: str,
+    mode: str,
+    path: Optional[str],
+    save_json: bool,
+    save_csv: bool,
 ) -> Dict[str, str]:
     """
-    Salva métricas em JSON e 2 arquivos CSV:
-    
-    1. overall.csv - Overall + Macro + Per_horizon para TODOS OS EVENTOS (agregado)
-    2. by_event.csv - Overall + Macro + Per_horizon POR CADA EVENTO
+    Salva métricas em JSON e CSV no diretório resolvido.
+
+    Detecta automaticamente se é event-based ou station-based.
     """
-    try:
-        from src.utils.experiment_utils import get_experiment_path
-        exp_path = get_experiment_path(experiment_name)
-    except ImportError:
-        exp_path = Path("outputs/experiments") / experiment_name
-
-    if base_dir is not None:
-        exp_path = Path(base_dir) / experiment_name
-
-    metrics_dir = exp_path / "predictions_test" / "metrics"
-    metrics_dir.mkdir(parents=True, exist_ok=True)
-
+    metrics_dir = _resolve_save_dir(subdir="raw", mode=mode, path=path)
     saved_paths = {}
 
     first_key = next(iter(metrics.keys()), None)
-    is_event_based = first_key in ['extreme', 'moderate', 'normal', 'extreme_high',
-                                    'extreme_low', 'moderate_high', 'moderate_low', 'all']
+    is_event_based = isinstance(first_key, str) and first_key in [
+        'extreme', 'moderate', 'normal', 'extreme_high',
+        'extreme_low', 'moderate_high', 'moderate_low', 'all',
+    ]
 
     if is_event_based:
         event_types = list(metrics.keys())
@@ -283,11 +379,10 @@ def save_metrics(
         saved_paths["json"] = str(json_path)
         print(f"💾 Métricas salvas (JSON): {json_path}")
 
-    # ======== CSVs - apenas 2 arquivos ========
+    # ======== CSVs ========
     if save_csv:
-        # ========== 1. OVERALL.CSV - Agregado de todos os eventos ==========
-        rows_all = []
-        
+        rows = []
+
         for event_label in event_types:
             if event_label not in metrics:
                 continue
@@ -300,7 +395,7 @@ def save_metrics(
                 # Overall
                 if 'overall' in m:
                     overall = m['overall']
-                    row = {
+                    rows.append({
                         'event_type': event_label,
                         'station': station,
                         'metric_level': 'overall',
@@ -312,13 +407,12 @@ def save_metrics(
                         'kge': overall.get('kge'),
                         'skill_rmse': overall.get('skill_rmse'),
                         'n_windows': m.get('n_windows'),
-                    }
-                    rows_all.append(row)
+                    })
 
                 # Macro
                 if 'macro' in m:
                     macro = m['macro']
-                    row = {
+                    rows.append({
                         'event_type': event_label,
                         'station': station,
                         'metric_level': 'macro',
@@ -330,8 +424,7 @@ def save_metrics(
                         'kge': None,
                         'skill_rmse': None,
                         'n_windows': m.get('n_windows'),
-                    }
-                    rows_all.append(row)
+                    })
 
                 # Per horizon
                 if 'per_horizon' in m:
@@ -339,7 +432,7 @@ def save_metrics(
                     if isinstance(per_horizon, dict):
                         n_horizons = len(per_horizon.get('rmse', []))
                         for h in range(n_horizons):
-                            row = {
+                            rows.append({
                                 'event_type': event_label,
                                 'station': station,
                                 'metric_level': f'horizon_{h+1}',
@@ -351,94 +444,21 @@ def save_metrics(
                                 'kge': None,
                                 'skill_rmse': None,
                                 'n_windows': m.get('n_windows'),
-                            }
-                            rows_all.append(row)
+                            })
 
-        if rows_all:
-            df_all = pd.DataFrame(rows_all)
-            csv_overall_path = metrics_dir / f"{filename_base}_overall.csv"
-            df_all.to_csv(csv_overall_path, index=False, sep='\t')
-            saved_paths["csv_overall"] = str(csv_overall_path)
-            print(f"💾 Métricas salvas (CSV Overall): {csv_overall_path}")
-
-        # ========== 2. BY_EVENT.CSV - Separado por evento ==========
-        rows_by_event = []
-        
-        for event_label in event_types:
-            if event_label not in metrics:
-                continue
-            station_metrics = metrics[event_label]
-
-            for station, m in station_metrics.items():
-                if not isinstance(m, dict):
-                    continue
-
-                # Overall
-                if 'overall' in m:
-                    overall = m['overall']
-                    row = {
-                        'event_type': event_label,
-                        'station': station,
-                        'metric_level': 'overall',
-                        'rmse': overall.get('rmse'),
-                        'mae': overall.get('mae'),
-                        'mape': overall.get('mape'),
-                        'r2': overall.get('r2'),
-                        'nse': overall.get('nse'),
-                        'kge': overall.get('kge'),
-                        'skill_rmse': overall.get('skill_rmse'),
-                        'n_windows': m.get('n_windows'),
-                    }
-                    rows_by_event.append(row)
-
-                # Macro
-                if 'macro' in m:
-                    macro = m['macro']
-                    row = {
-                        'event_type': event_label,
-                        'station': station,
-                        'metric_level': 'macro',
-                        'rmse': macro.get('rmse'),
-                        'mae': macro.get('mae'),
-                        'mape': macro.get('mape'),
-                        'r2': macro.get('r2'),
-                        'nse': macro.get('nse'),
-                        'kge': None,
-                        'skill_rmse': None,
-                        'n_windows': m.get('n_windows'),
-                    }
-                    rows_by_event.append(row)
-
-                # Per horizon
-                if 'per_horizon' in m:
-                    per_horizon = m['per_horizon']
-                    if isinstance(per_horizon, dict):
-                        n_horizons = len(per_horizon.get('rmse', []))
-                        for h in range(n_horizons):
-                            row = {
-                                'event_type': event_label,
-                                'station': station,
-                                'metric_level': f'horizon_{h+1}',
-                                'rmse': per_horizon.get('rmse', [None])[h],
-                                'mae': per_horizon.get('mae', [None])[h],
-                                'mape': per_horizon.get('mape', [None])[h],
-                                'r2': per_horizon.get('r2', [None])[h],
-                                'nse': per_horizon.get('nse', [None])[h],
-                                'kge': None,
-                                'skill_rmse': None,
-                                'n_windows': m.get('n_windows'),
-                            }
-                            rows_by_event.append(row)
-
-        if rows_by_event:
-            df_by_event = pd.DataFrame(rows_by_event)
-            csv_by_event_path = metrics_dir / f"{filename_base}_by_event.csv"
-            df_by_event.to_csv(csv_by_event_path, index=False, sep='\t')
-            saved_paths["csv_by_event"] = str(csv_by_event_path)
-            print(f"💾 Métricas salvas (CSV By Event): {csv_by_event_path}")
+        if rows:
+            df_out = pd.DataFrame(rows)
+            csv_path = metrics_dir / f"{filename_base}.csv"
+            df_out.to_csv(csv_path, index=False, sep='\t')
+            saved_paths["csv"] = str(csv_path)
+            print(f"💾 Métricas salvas (CSV): {csv_path}")
 
     return saved_paths
 
+
+# ===========================================================================
+# FUNÇÕES DE IMPRESSÃO
+# ===========================================================================
 
 def print_metrics_summary(metrics: Dict[int, Dict[str, Any]]) -> None:
     """Imprime resumo formatado das métricas."""
