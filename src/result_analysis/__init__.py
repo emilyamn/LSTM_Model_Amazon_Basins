@@ -12,7 +12,8 @@ from .plots import (
     plot_metrics_by_horizon,
     plot_full_series_with_d1_forecast,
     plot_predictions_extremes,
-    plot_metrics_by_horizon_comparison
+    plot_metrics_by_horizon_comparison,
+    plot_forecast_horizons_analysis
 )
 from .extract_flow_extremes import analyze_flow_extremes
 
@@ -26,5 +27,6 @@ __all__ = [
     'plot_full_series_with_d1_forecast',
     'analyze_flow_extremes',
     'plot_predictions_extremes',
-    'plot_metrics_by_horizon_comparison'
+    'plot_metrics_by_horizon_comparison',
+    'plot_forecast_horizons_analysis'
 ]

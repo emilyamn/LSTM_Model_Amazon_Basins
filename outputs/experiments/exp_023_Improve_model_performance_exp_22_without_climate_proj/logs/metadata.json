@@ -1,0 +1,13 @@
+{
+  "exp_id": 23,
+  "branch_name": "Improve_model_performance",
+  "exp_name": "exp_22_without_climate_proj",
+  "exp_dir": "C:\\Users\\emily\\Documents\\GitHub\\Mini-curso-GitHub-Leo\\outputs\\experiments\\exp_023_Improve_model_performance_exp_22_without_climate_proj",
+  "created_at": "2026-04-15 23:35:43",
+  "description": "\u00daltimas 8 \u00e9pocas do treino agora rodam sem teacher forcing e Adicionado par\u00e2metro gate_target=0.30, para equil\u00edbrio no gate",
+  "config_files": [
+    "data_config.yaml",
+    "model_config.yaml",
+    "training_config.yaml"
+  ]
+}

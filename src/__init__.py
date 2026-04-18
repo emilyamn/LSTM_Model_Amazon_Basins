@@ -95,7 +95,8 @@ from .result_analysis.plots import (
     plot_metrics_by_horizon,
     plot_full_series_with_d1_forecast,
     plot_predictions_extremes,
-    plot_metrics_by_horizon_comparison
+    plot_metrics_by_horizon_comparison,
+    plot_forecast_horizons_analysis
 )
 
 # Importações principais - LinAR
@@ -177,6 +178,7 @@ __all__ = [
     "analyze_flow_extremes",
     "compute_metrics_by_event_type",
     "print_metrics_comparison_by_event",
+    "plot_forecast_horizons_analysis",
     
     # ===== LINAR =====
     "interpolate_linar",

@@ -4,6 +4,7 @@ Módulo para visualização de resultados do modelo.
 
 from datetime import timedelta
 from typing import List, Optional, Dict, Any
+from matplotlib import Path
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -454,3 +455,197 @@ def plot_metrics_by_horizon_comparison(
     if not return_fig:
         plt.close(fig)
     return fig
+
+def plot_forecast_horizons_analysis(
+    preds: np.ndarray,
+    obs: np.ndarray,
+    stations: List[int],
+    forecast_dates: np.ndarray,
+    df: pd.DataFrame,
+    experiment_name: Optional[str] = None,
+    mode: str = "test",
+    save_path: Optional[str] = None,
+    show: bool = True,
+    figsize: tuple = (16, 5),
+    dpi: int = 300
+) -> List[plt.Figure]:
+    """
+    Plota análise completa de horizontes de previsão:
+    1. Gráfico principal: Observado + D+1 + D+horizonte_máximo
+    2. Gráficos individuais: Observado + D+x para cada horizonte (1 até max)
+    
+    Salva automaticamente na pasta do experimento ou em caminho customizado.
+    """
+    B, T, S = preds.shape
+    forecast_dates_dt = pd.to_datetime(forecast_dates)
+    
+    # Determinar período a plotar
+    start_date = forecast_dates_dt.min()
+    end_date = forecast_dates_dt.max() + timedelta(days=T-1)
+    
+    # Validar mode
+    if mode not in ["test", "val", "train"]:
+        raise ValueError(f"mode deve ser 'test', 'val' ou 'train', recebido: {mode}")
+    
+    mode_name_map = {"test": "Teste", "val": "Validação", "train": "Treino"}
+    mode_display = mode_name_map[mode]
+    
+    figures = []
+    
+    # ==========================================
+    # GRÁFICO 1: SÉRIE COMPLETA COM D+1 E D+MAX
+    # ==========================================
+    print(f"\n📊 Criando gráfico principal ({mode_display}: D+1 e D+{T})...")
+    
+    fig_main, axes = plt.subplots(S, 1, figsize=(figsize[0], figsize[1] * S), sharex=True)
+    axes = np.atleast_1d(axes)
+    
+    for st_i, st_id in enumerate(stations):
+        ax = axes[st_i]
+        
+        # Série observada completa do período
+        period_mask = (df.index >= start_date) & (df.index <= end_date)
+        period_dates = df.index[period_mask]
+        period_obs = df[f"Q_{st_id}"].loc[period_mask].values
+        
+        ax.plot(period_dates, period_obs,
+               label='Observado', color='black', linewidth=1.5, alpha=0.8)
+        
+        # Previsões D+1
+        d1_dates = []
+        d1_values = []
+        
+        for idx in range(B):
+            d1_dates.append(forecast_dates_dt[idx])
+            d1_values.append(preds[idx, 0, st_i])
+        
+        ax.scatter(d1_dates, d1_values,
+                  label='Previsão D+1', color='royalblue', s=20, alpha=0.7, zorder=5)
+        
+        # Previsões D+horizonte_máximo
+        dmax_dates = []
+        dmax_values = []
+        
+        for idx in range(B):
+            dmax_date = forecast_dates_dt[idx] + timedelta(days=T-1)
+            dmax_dates.append(dmax_date)
+            dmax_values.append(preds[idx, T-1, st_i])
+        
+        ax.scatter(dmax_dates, dmax_values,
+                  label=f'Previsão D+{T}', color='orange', s=20, alpha=0.7, marker='s', zorder=5)
+        
+        # Formatação
+        ax.set_title(
+            f'Estação {st_id} — Série {mode_display} Completa (D+1 e D+{T})',
+            fontsize=12, fontweight='bold'
+        )
+        ax.set_ylabel('Vazão (m³/s)', fontsize=11)
+        ax.grid(True, alpha=0.3)
+        ax.legend(loc='best', fontsize=10)
+        
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+        ax.xaxis.set_major_locator(mdates.MonthLocator())
+        
+        if st_i == S - 1:
+            ax.set_xlabel('Data', fontsize=11)
+            plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
+    
+    plt.tight_layout()
+    if show:
+        plt.show()
+    
+    figures.append(fig_main)
+    
+    # Salvar gráfico principal
+    _save_figure(fig_main, experiment_name, mode, save_path, 
+                 f"{mode}_d1_dmax.png", dpi)
+    
+    # ==========================================
+    # GRÁFICOS 2-(T+1): SÉRIE COMPLETA COM D+x
+    # ==========================================
+    print(f"\n📊 Criando {T} gráficos individuais (D+1 até D+{T})...")
+    
+    for horizon in range(T):
+        horizon_day = horizon + 1  # D+1, D+2, ..., D+T
+        
+        print(f"  → Criando gráfico D+{horizon_day}...")
+        
+        fig_h, axes_h = plt.subplots(S, 1, figsize=(figsize[0], figsize[1] * S), sharex=True)
+        axes_h = np.atleast_1d(axes_h)
+        
+        for st_i, st_id in enumerate(stations):
+            ax = axes_h[st_i]
+            
+            # ✅ CORREÇÃO: RECALCULAR period_obs PARA CADA ESTAÇÃO
+            period_mask = (df.index >= start_date) & (df.index <= end_date)
+            period_dates = df.index[period_mask]
+            period_obs = df[f"Q_{st_id}"].loc[period_mask].values
+            
+            # Série observada completa do período
+            ax.plot(period_dates, period_obs,
+                   label='Observado', color='black', linewidth=1.5, alpha=0.8)
+            
+            # Previsões D+x
+            dx_dates = []
+            dx_values = []
+            
+            for idx in range(B):
+                dx_date = forecast_dates_dt[idx] + timedelta(days=horizon)
+                dx_dates.append(dx_date)
+                dx_values.append(preds[idx, horizon, st_i])
+            
+            ax.scatter(dx_dates, dx_values,
+                      label=f'Previsão D+{horizon_day}', 
+                      color='green', s=20, alpha=0.7, zorder=5)
+            
+            # Formatação
+            ax.set_title(
+                f'Estação {st_id} — Série {mode_display} com Previsões D+{horizon_day}',
+                fontsize=12, fontweight='bold'
+            )
+            ax.set_ylabel('Vazão (m³/s)', fontsize=11)
+            ax.grid(True, alpha=0.3)
+            ax.legend(loc='best', fontsize=10)
+            
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+            ax.xaxis.set_major_locator(mdates.MonthLocator())
+            
+            if st_i == S - 1:
+                ax.set_xlabel('Data', fontsize=11)
+                plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
+        
+        plt.tight_layout()
+        if show:
+            plt.show()
+        
+        figures.append(fig_h)
+        
+        # Salvar gráfico individual
+        _save_figure(fig_h, experiment_name, mode, save_path, 
+                     f"{mode}_d{horizon_day}.png", dpi)
+    
+    print(f"\n✅ Total de {len(figures)} gráficos criados!")
+    
+    return figures
+
+
+def _save_figure(
+    fig: plt.Figure,
+    experiment_name: Optional[str],
+    mode: str,
+    save_path: Optional[str],
+    filename: str,
+    dpi: int
+) -> None:
+    """Função auxiliar para salvar figuras."""
+    if experiment_name is not None:
+        try:
+            from src.utils.experiment_utils import save_plot
+            save_plot(fig, experiment_name, mode="test", name=filename, dpi=dpi)
+        except Exception as e:
+            print(f"⚠️ Erro ao salvar via experimento: {e}")
+    elif save_path is not None:
+        save_dir = Path(save_path)
+        save_dir.mkdir(parents=True, exist_ok=True)
+        fig.savefig(save_dir / filename, dpi=dpi, bbox_inches='tight')
+        print(f"💾 Salvo: {save_dir / filename}")
