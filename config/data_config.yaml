@@ -1,31 +1,21 @@
 # ==========================================================
-# NOMENCLATURA DESCRITIVA DO EXPERIMENTO 
+# NOMENCLATURA DESCRITIVA DO EXPERIMENTO
 # ==========================================================
-experiment_name: exp_22_without_climate_proj
-description: fazer comparativo direto com experimento 22 retirando delta_clim
-model_name: exp_22_without_climate_proj.pth
+experiment_name: ana_inputs
+description: exp 23 from old repository with ana data files and new stations
+model_name: model_ana_inputs.pth
 
 # ==========================================================
 # CONFIGURAÇÕES DE ESTAÇÕES E ATRIBUTOS ESTÁTICOS
 # ==========================================================
 stations: [10100000, 13150003, 14100000, 16030000]
 
-stations:
-  - id: 10100000
-    flow_type: vazao          # "vazao" ou "cota"
-    precip_id: 469000
-
-  - id: 13150003
-    flow_type: vazao
-    precip_id: 463001
-
-  - id: 14100000
-    flow_type: vazao
-    precip_id: 360001
-
-  - id: 16030000
-    flow_type: vazao
-    precip_id: 358000
+# Metadados auxiliares de cada estação (usados no pré-processamento ANA)
+station_metadata:
+  10100000: {flow_type: vazao, precip_id: 469001}
+  13150003: {flow_type: vazao, precip_id: 463001}
+  14100000: {flow_type: vazao, precip_id: 360001}
+  16030000: {flow_type: vazao, precip_id: 358000}
 
 # Chaves de atributos estáticos
 #static_keys:
@@ -35,42 +25,25 @@ stations:
 #  - AI_mean
 
 #static_attributes:
-#  10100000: {"area": 985960.227, "elev_mean": 1169.482, "slope_mean": 11.98, "AI_mean": 16705.015625}
-#  13150000: {"area": 1228406.577, "elev_mean": 977.5172, "slope_mean": 10.66077, "AI_mean": 18044.228516}
-#  14100000: {"area": 2204799.054, "elev_mean": 11.98524, "slope_mean": 8.19661, "AI_mean": 18840.925781}
+#  10100000: {...}
+#  13150003: {...}
+#  14100000: {...}
+#  16030000: {...}
 
 # ==========================================================
 # CONFIGURAÇÕES DE JANELAS (DATASET CREATION)
 # ==========================================================
 horizon: 15
 
+# Janelas únicas aplicadas a TODAS as estações.
+# Todas as estações veem todas as features (sem hierarquia espacial, sem travel_time).
 flow_window_config:
-  10100000:
-    encoder:
-      - {source: 10100000, start: -30, end: -1, travel_time: 0}
-    decoder:
-      - {source: 10100000, start: -30, end: -1, travel_time: 0}
-  13150000:
-    encoder:
-      - {source: 10100000, start: -23, end: -1, travel_time: 7}
-      - {source: 13150000, start: -30, end: -1, travel_time: 0}
-    decoder:
-      - {source: 10100000, start: -23, end: -1, travel_time: 7}
-      - {source: 13150000, start: -30, end: -1, travel_time: 0}
-  14100000:
-    encoder:
-      - {source: 10100000, start: -15, end: -1, travel_time: 15}
-      - {source: 13150000, start: -22, end: -1, travel_time: 8}
-      - {source: 14100000, start: -30, end: -1, travel_time: 0}
-    decoder:
-      - {source: 10100000, start: -15, end: -1, travel_time: 15}
-      - {source: 13150000, start: -22, end: -1, travel_time: 8}
-      - {source: 14100000, start: -30, end: -1, travel_time: 0}
+  encoder: {start: -30, end: -1}
+  decoder: {start: -30, end: -1}
 
-#climate_window_config:
-#  10100000: {encoder: [-30, -1], decoder: [-30, 14]}
-#  13150000: {encoder: [-30, -1], decoder: [-30, 14]}
-#  14100000: {encoder: [-30, -1], decoder: [-30, 14]}
+climate_window_config:
+  encoder: {start: -30, end: -1}
+  decoder: {start: -30, end: 14}
 
 temporal_features: [day_sin, day_cos, month_sin, month_cos]
 

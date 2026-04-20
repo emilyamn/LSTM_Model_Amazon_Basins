@@ -202,41 +202,54 @@ class HydroDataset(Dataset):
     def _build_flow_block(
         self, center: int, stage: str
     ) -> Tuple[List[np.ndarray], List[np.ndarray], List[int]]:
+        """
+        Constrói o bloco de vazão para encoder/decoder.
+
+        Cada estação contribui com uma única série Q_{station} lida nos mesmos
+        offsets globais (sem hierarquia espacial, sem travel_time). Todas as
+        estações enxergam todas as features porque todas as séries são
+        empilhadas no tensor dinâmico.
+        """
+        spec = self.flow_window_config[stage]
         global_offsets = self.encoder_offsets if stage == "encoder" else self.decoder_offsets
+        spec_offsets = np.arange(spec["start"], spec["end"] + 1)
+
+        # Mapa de alinhamento (spec_offsets → global_offsets) — constante por estágio.
+        slot_by_spec = np.full(len(spec_offsets), -1, dtype=np.int64)
+        for i, off in enumerate(spec_offsets):
+            match = np.where(global_offsets == off)[0]
+            if match.size:
+                slot_by_spec[i] = match[0]
+
         flow_arrays, mask_arrays = [], []
         station_indices: List[int] = []
 
         for st_idx, station in enumerate(self.stations):
-            for spec in self.flow_window_config[station][stage]:
-                spec_offsets = np.arange(spec["start"], spec["end"] + 1)
-                raw_values = self._slice_series(
-                    self.df[f"Q_{spec['source']}"],
-                    center,
-                    spec_offsets - spec["travel_time"],
-                )
+            raw_values = self._slice_series(
+                self.df[f"Q_{station}"], center, spec_offsets
+            )
 
-                aligned_values = np.full(len(global_offsets), np.nan, dtype=np.float32)
-                aligned_mask = np.zeros(len(global_offsets), dtype=np.float32)
+            aligned_values = np.full(len(global_offsets), np.nan, dtype=np.float32)
+            aligned_mask = np.zeros(len(global_offsets), dtype=np.float32)
 
-                for local_idx, spec_off in enumerate(spec_offsets):
-                    match = np.where(global_offsets == spec_off)[0]
-                    if match.size:
-                        slot = match[0]
-                        val = raw_values[local_idx]
-                        if not np.isnan(val):
-                            aligned_values[slot] = val
-                            aligned_mask[slot] = 1.0
+            for local_idx, slot in enumerate(slot_by_spec):
+                if slot < 0:
+                    continue
+                val = raw_values[local_idx]
+                if not np.isnan(val):
+                    aligned_values[slot] = val
+                    aligned_mask[slot] = 1.0
 
-                scaler = self.flow_scalers[f"Q_{spec['source']}"]
-                norm_values = scaler.transform(
-                    torch.from_numpy(
-                        np.nan_to_num(aligned_values, nan=scaler.mean)
-                    ).float()
-                ).numpy()
+            scaler = self.flow_scalers[f"Q_{station}"]
+            norm_values = scaler.transform(
+                torch.from_numpy(
+                    np.nan_to_num(aligned_values, nan=scaler.mean)
+                ).float()
+            ).numpy()
 
-                flow_arrays.append(norm_values)
-                mask_arrays.append(aligned_mask)
-                station_indices.append(st_idx)
+            flow_arrays.append(norm_values)
+            mask_arrays.append(aligned_mask)
+            station_indices.append(st_idx)
 
         return flow_arrays, mask_arrays, station_indices
 
