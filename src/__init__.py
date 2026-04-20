@@ -1,6 +1,9 @@
 """
 Módulo principal para previsão hidrológica.
 """
+from .preprocessing_ana_data.ana_data_into_series import convert_all_ana_series
+from .preprocessing_ana_data.merge_ana_data import build_raw_dataset
+
 from .data_processing import (
     # Complete Series
     DataPreprocessor,
@@ -109,6 +112,10 @@ from .linar import (
 )
 
 __all__ = [
+    # ===== ANA DATA =====
+    "convert_all_ana_series",
+    "build_raw_dataset",
+
     # ===== DATA PROCESSING =====
     "DataPreprocessor",
     "batch_interpolate_and_overwrite",
