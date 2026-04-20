@@ -33,8 +33,22 @@ def _load_series(path: Path, value_col: str, rename_to: str) -> pd.DataFrame:
 def _merge_station(q_path: Path, p_path: Path, q_col: str) -> pd.DataFrame:
     q = _load_series(q_path, q_col, "Q")
     p = _load_series(p_path, "Precipitacao", "P")
+
+    q_first, q_last = q["Q"].first_valid_index(), q["Q"].last_valid_index()
+    p_first, p_last = p["P"].first_valid_index(), p["P"].last_valid_index()
+    if None in (q_first, q_last, p_first, p_last):
+        raise ValueError(f"Série sem dados válidos: Q={q_path.name}, P={p_path.name}")
+
+    start = max(q_first, p_first)
+    end   = min(q_last, p_last)
+    if start > end:
+        raise ValueError(
+            f"Sem sobreposição entre Q ({q_first.date()}–{q_last.date()}) "
+            f"e P ({p_first.date()}–{p_last.date()}) em {q_path.name}."
+        )
+
     merged   = q.join(p, how="outer")
-    full_idx = pd.date_range(merged.index.min(), merged.index.max(), freq="D")
+    full_idx = pd.date_range(start, end, freq="D")
     merged   = merged.reindex(full_idx)
     merged.index.name = "Date"
     return merged.reset_index()
@@ -78,16 +92,20 @@ def build_raw_dataset(yaml_path: Path = YAML_PATH) -> list[dict]:
         cfg = yaml.safe_load(f)
 
     stations = cfg.get("stations", [])
+    metadata = cfg.get("station_metadata", {})
     if not stations:
-        print("Nenhuma estação encontrada em station_mapping.yaml.")
+        print("Nenhuma estação encontrada em data_config.yaml.")
         return []
 
     summary = []
 
-    for stn in stations:
-        station_id = stn["id"]
-        flow_type  = stn["flow_type"]
-        precip_id  = stn["precip_id"]
+    for station_id in stations:
+        meta = metadata.get(station_id)
+        if meta is None:
+            print(f"[{station_id}] SKIP — sem entrada em station_metadata.")
+            continue
+        flow_type = meta["flow_type"]
+        precip_id = meta["precip_id"]
 
         q_dir  = SRC / f"{flow_type}_series"
         p_dir  = SRC / "precipitacao_series"

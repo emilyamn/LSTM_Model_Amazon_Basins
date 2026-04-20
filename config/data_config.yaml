@@ -1,7 +1,7 @@
 # ==========================================================
 # NOMENCLATURA DESCRITIVA DO EXPERIMENTO
 # ==========================================================
-experiment_name: ana_inputs
+experiment_name: ana_inputs_without_timelag
 description: exp 23 from old repository with ana data files and new stations
 model_name: model_ana_inputs.pth
 
