@@ -417,7 +417,20 @@ class HydroFeatureEngineer:
                 df, left_index=True, right_index=True, how="outer"
             )
 
-        combined_df = combined_df.ffill().bfill()
+        # Preenche gaps INTERNOS ao intervalo válido de cada coluna (ffill+bfill
+        # limitado a [first_valid_index, last_valid_index]). Períodos fora do
+        # intervalo válido de cada estação permanecem NaN — esses centros são
+        # excluídos automaticamente por HydroDataset._build_valid_indices, de
+        # modo que estações com tamanhos diferentes coexistem sem fabricar
+        # dados fora dos seus respectivos intervalos.
+        for col in combined_df.columns:
+            s = combined_df[col]
+            first, last = s.first_valid_index(), s.last_valid_index()
+            if first is None or last is None:
+                continue
+            window = s.loc[first:last].ffill().bfill()
+            combined_df.loc[first:last, col] = window
+
         combined_df = self.add_seasonal_features(combined_df)
 
         print(f"✅ CONCLUÍDO — {len(combined_df.columns)} colunas")

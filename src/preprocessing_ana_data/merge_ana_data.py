@@ -1,10 +1,12 @@
 """Merge Q and P series into final raw/ files for the LSTM pipeline.
 
-Reads station_mapping.yaml and for each station:
+Reads data_config.yaml and for each station:
   - Loads Q from vazao_series/ or cota_series/ (based on flow_type)
   - Loads P from precipitacao_series/
-  - Outer-joins on date, reindexes to full daily range
-  - Saves to data/raw/{id}.csv with columns (Date, Q, P)
+  - Restringe o período ao intervalo de sobreposição Q∩P; mantém NaNs nos
+    gaps internos desse intervalo.
+  - Salva em data/raw/{id}.csv com colunas (date, streamflow_m3s,
+    precipitation_chirps), nomes esperados pelo pipeline downstream.
 """
 from pathlib import Path
 import pandas as pd
@@ -31,11 +33,13 @@ def _load_series(path: Path, value_col: str, rename_to: str) -> pd.DataFrame:
 
 
 def _merge_station(q_path: Path, p_path: Path, q_col: str) -> pd.DataFrame:
-    q = _load_series(q_path, q_col, "Q")
-    p = _load_series(p_path, "Precipitacao", "P")
+    q = _load_series(q_path, q_col, "streamflow_m3s")
+    p = _load_series(p_path, "Precipitacao", "precipitation_chirps")
 
-    q_first, q_last = q["Q"].first_valid_index(), q["Q"].last_valid_index()
-    p_first, p_last = p["P"].first_valid_index(), p["P"].last_valid_index()
+    q_first = q["streamflow_m3s"].first_valid_index()
+    q_last  = q["streamflow_m3s"].last_valid_index()
+    p_first = p["precipitation_chirps"].first_valid_index()
+    p_last  = p["precipitation_chirps"].last_valid_index()
     if None in (q_first, q_last, p_first, p_last):
         raise ValueError(f"Série sem dados válidos: Q={q_path.name}, P={p_path.name}")
 
@@ -50,7 +54,7 @@ def _merge_station(q_path: Path, p_path: Path, q_col: str) -> pd.DataFrame:
     merged   = q.join(p, how="outer")
     full_idx = pd.date_range(start, end, freq="D")
     merged   = merged.reindex(full_idx)
-    merged.index.name = "Date"
+    merged.index.name = "date"
     return merged.reset_index()
 
 
@@ -59,10 +63,10 @@ def _nan_pct(series: pd.Series) -> float:
 
 
 def _log_station(station_id: int, df: pd.DataFrame) -> dict:
-    date_min = df["Date"].min().date()
-    date_max = df["Date"].max().date()
-    q_nan    = _nan_pct(df["Q"])
-    p_nan    = _nan_pct(df["P"])
+    date_min = df["date"].min().date()
+    date_max = df["date"].max().date()
+    q_nan    = _nan_pct(df["streamflow_m3s"])
+    p_nan    = _nan_pct(df["precipitation_chirps"])
     print(
         f"[{station_id}]  {date_min} → {date_max}  |  "
         f"rows={len(df):,}  |  Q NaN={q_nan:.1f}%  P NaN={p_nan:.1f}%"

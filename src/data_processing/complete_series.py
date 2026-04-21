@@ -56,28 +56,34 @@ class DataPreprocessor:
                 self.amazon_data[station_id] = df
         return self.amazon_data
     
-    def process_station(self, df_original: pd.DataFrame, 
-                       station_id: int, 
-                       start_date: str = '1995-01-01',
-                       end_date: str = '2012-04-30') -> pd.DataFrame:
+    def process_station(self, df_original: pd.DataFrame,
+                       station_id: int,
+                       start_date: Optional[str] = None,
+                       end_date: Optional[str] = None) -> pd.DataFrame:
         """
         Processa uma única estação, preenchendo datas faltantes.
-        
+
         Args:
             df_original: DataFrame original da estação
             station_id: ID da estação
-            start_date: Data inicial do período
-            end_date: Data final do período
-                  
+            start_date: Data inicial do período. Se None, usa a primeira data
+                        da própria série (permite estações com tamanhos
+                        diferentes).
+            end_date:   Data final do período. Se None, usa a última data da
+                        própria série.
+
         Returns:
             DataFrame processado com datas completas
         """
         df = df_original.copy()
         df['date'] = pd.to_datetime(df['date'])
-        
+
+        effective_start = pd.to_datetime(start_date) if start_date is not None else df['date'].min()
+        effective_end   = pd.to_datetime(end_date)   if end_date   is not None else df['date'].max()
+
         # Criar intervalo completo de datas
         date_range = pd.DataFrame({
-            "date": pd.date_range(start_date, end_date, freq="D")
+            "date": pd.date_range(effective_start, effective_end, freq="D")
         })
         
         # Fazer merge para completar datas
@@ -96,18 +102,20 @@ class DataPreprocessor:
                                  auxiliary_stations: List[int],
                                  main_output_path: str,
                                  auxiliary_output_path: str,
-                                 start_date: str = '1995-01-01',
-                                 end_date: str = '2012-04-30') -> Tuple[Dict, Dict]:
+                                 start_date: Optional[str] = None,
+                                 end_date: Optional[str] = None) -> Tuple[Dict, Dict]:
         """
         Processa e salva estações em pastas separadas.
-        
+
         Args:
             main_stations: Lista de IDs para complete_series
             auxiliary_stations: Lista de IDs para auxiliary_complete_series
             main_output_path: Caminho para salvar séries principais
             auxiliary_output_path: Caminho para salvar séries auxiliares
-            start_date: Data inicial
-            end_date: Data final
+            start_date: Data inicial global. Se None, cada estação usa a sua
+                        própria primeira data (tamanhos diferentes ok).
+            end_date:   Data final global. Se None, cada estação usa a sua
+                        própria última data.
             
         Returns:
             Tupla com (dicionário de séries principais, dicionário de séries auxiliares)

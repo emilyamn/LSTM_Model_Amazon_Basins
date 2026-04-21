@@ -8,14 +8,14 @@ model_name: model_ana_inputs.pth
 # ==========================================================
 # CONFIGURAÇÕES DE ESTAÇÕES E ATRIBUTOS ESTÁTICOS
 # ==========================================================
-stations: [10100000, 13150003, 14100000, 16030000]
+stations: [10100000,  14100000, 16030000]
 
 # Metadados auxiliares de cada estação (usados no pré-processamento ANA)
 station_metadata:
   10100000: {flow_type: vazao, precip_id: 469001}
-  13150003: {flow_type: vazao, precip_id: 463001}
+  #13150003: {flow_type: vazao, precip_id: 463000} # Sem sobreposição
   14100000: {flow_type: vazao, precip_id: 360001}
-  16030000: {flow_type: vazao, precip_id: 358000}
+  #16030000: {flow_type: vazao, precip_id: 358000} # Sem sobreposição
 
 # Chaves de atributos estáticos
 #static_keys:
