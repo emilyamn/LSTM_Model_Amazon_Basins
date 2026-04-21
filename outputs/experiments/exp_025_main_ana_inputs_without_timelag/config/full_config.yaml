@@ -1,0 +1,134 @@
+data:
+  experiment_name: ana_inputs_without_timelag
+  description: exp 23 from old repository with ana data files and new stations
+  model_name: model_ana_inputs.pth
+  stations:
+  - 10100000
+  - 14100000
+  - 16030000
+  station_metadata:
+    10100000:
+      flow_type: vazao
+      precip_id: 469001
+    14100000:
+      flow_type: vazao
+      precip_id: 360001
+  horizon: 15
+  flow_window_config:
+    encoder:
+      start: -30
+      end: -1
+    decoder:
+      start: -30
+      end: -1
+  climate_window_config:
+    encoder:
+      start: -30
+      end: -1
+    decoder:
+      start: -30
+      end: 14
+  temporal_features:
+  - day_sin
+  - day_cos
+  - month_sin
+  - month_cos
+  api_k_list:
+  - 0.7
+  - 0.8
+  - 0.85
+  - 0.9
+  - 0.92
+  - 0.95
+  precipitation_ma:
+  - 3
+  - 7
+  - 15
+  precipitation_cum:
+  - 3
+  - 5
+  - 7
+  - 10
+  evapotranspiration_ma:
+  - 7
+  - 14
+  - 30
+  anomaly_ma:
+  - 3
+  - 7
+  forecast_ma:
+  - 3
+  - 7
+  - 15
+  forecast_cum:
+  - 3
+  - 5
+  - 7
+  - 10
+  reference_dates:
+  - '2026-03-16'
+  split_config:
+    train_ratio: 0.85
+    val_ratio: 0.1
+    test_ratio: 0.05
+    gap: 128
+    window_stride: 1
+model:
+  architecture:
+    hidden_dim: 256
+    num_layers: 3
+    dropout: 0.2
+    attention: true
+    residual: true
+    non_negative: false
+    use_climate_proj: false
+  gate:
+    y_prev: true
+    from_inputs: true
+    clamp_by_ceiling: false
+    ceiling_min: 0.15
+    detach_y_prev: true
+    min: 0.02
+    max: 0.25
+  regularization:
+    input_noise_std: 0.05
+    y_prev_dropout_p: 0.3
+    y_prev_mask_p: 0.3
+    y_prev_mask_step_gamma: 0.2
+    decoder_feat_dropout_p: 0.15
+    tf_step_decay: 0.1
+  misc:
+    device: cuda
+training:
+  epochs: 80
+  batch_size: 64
+  learning_rate: 0.0005
+  weight_decay: 0.0001
+  clip_grad_norm: 3.0
+  teacher_forcing:
+    initial: 0.5
+    decay: 0.94
+    final: 0.0
+    free_run_tail: 5
+    early_free_run_patience: 15
+  loss_weights:
+    smooth: 0.0
+    negative: 0.01
+    continuity: 0.001
+    slope: 1.0
+    gate_bias: 0.05
+    direction: 0.8
+    direction_start: 0
+  horizon_weights:
+    mode: increasing
+    gamma: 0.1
+  direction:
+    start: 0
+    weight_gamma: 0.05
+  gate_decay: 0.06
+  early_stopping:
+    patience: 5
+    min_delta: 0.0001
+  scheduler:
+    patience: 6
+    factor: 0.7

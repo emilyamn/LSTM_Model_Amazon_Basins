@@ -13,6 +13,7 @@ Mudanças principais (v2):
 
 from typing import Dict, List, Optional, Literal, Union
 import pathlib
+import re
 import sys
 import pandas as pd
 import numpy as np
@@ -417,19 +418,41 @@ class HydroFeatureEngineer:
                 df, left_index=True, right_index=True, how="outer"
             )
 
-        # Preenche gaps INTERNOS ao intervalo válido de cada coluna (ffill+bfill
-        # limitado a [first_valid_index, last_valid_index]). Períodos fora do
-        # intervalo válido de cada estação permanecem NaN — esses centros são
-        # excluídos automaticamente por HydroDataset._build_valid_indices, de
-        # modo que estações com tamanhos diferentes coexistem sem fabricar
-        # dados fora dos seus respectivos intervalos.
+        # Preenche gaps dentro do intervalo válido de CADA ESTAÇÃO (usando
+        # Q_{station} como referência) e deixa NaN fora — as janelas fora
+        # desses intervalos são descartadas em HydroDataset._build_valid_indices.
+        #
+        # Agrupar por sufixo "_{station_id}" garante que features com edges de
+        # rolling-window (precipitation_ma_30, api_k, etc.) sejam preenchidas
+        # dentro da janela válida da estação, evitando NaN na entrada do modelo.
+        suffix_re = re.compile(r"_(\d+)$")
+        station_cols: Dict[int, List[str]] = {}
+        global_cols: List[str] = []
         for col in combined_df.columns:
+            m = suffix_re.search(col)
+            if m:
+                station_cols.setdefault(int(m.group(1)), []).append(col)
+            else:
+                global_cols.append(col)
+
+        for st, cols in station_cols.items():
+            q_col = f"Q_{st}"
+            if q_col not in combined_df.columns:
+                continue
+            q = combined_df[q_col]
+            first, last = q.first_valid_index(), q.last_valid_index()
+            if first is None or last is None:
+                continue
+            combined_df.loc[first:last, cols] = (
+                combined_df.loc[first:last, cols].ffill().bfill()
+            )
+
+        for col in global_cols:
             s = combined_df[col]
             first, last = s.first_valid_index(), s.last_valid_index()
             if first is None or last is None:
                 continue
-            window = s.loc[first:last].ffill().bfill()
-            combined_df.loc[first:last, col] = window
+            combined_df.loc[first:last, col] = s.loc[first:last].ffill().bfill()
 
         combined_df = self.add_seasonal_features(combined_df)
 
