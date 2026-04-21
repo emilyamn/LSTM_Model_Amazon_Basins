@@ -606,9 +606,9 @@ def merge_observed_and_forecast(
 
 def process_features(
     input_dir: pathlib.Path,
-    forecast_dir: pathlib.Path,
     output_dir: pathlib.Path,
     station_ids: List[int],
+    forecast_dir: Optional[pathlib.Path] = None,
     api_k_list: Optional[List[float]] = None,
     ma_windows: Optional[List[int]] = None,
     cumulative_windows: Optional[List[int]] = None,
@@ -630,8 +630,11 @@ def process_features(
 
     Args:
         input_dir: Diretório com CSVs de séries completas observadas.
-        forecast_dir: Diretório com CSVs de forecast.
         output_dir: Diretório de saída.
+        forecast_dir: Diretório com CSVs de forecast. Opcional. Se None (ou
+                      o diretório não existir), o pipeline roda apenas com
+                      a precipitação observada — o próprio valor observado
+                      em D+0…D+N é tratado como "forecast" pelo modelo.
         station_ids: IDs das estações.
         api_k_list: Valores de k para API.
         ma_windows: Janelas de médias móveis de precipitação.
@@ -655,8 +658,6 @@ def process_features(
 
     if not input_dir.exists():
         raise FileNotFoundError(f"Diretório de entrada não encontrado: {input_dir}")
-    if not forecast_dir.exists():
-        raise FileNotFoundError(f"Diretório de forecast não encontrado: {forecast_dir}")
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -664,9 +665,14 @@ def process_features(
     observed_dict = load_station_data(input_dir, station_ids)
     print(f"✓ {len(observed_dict)} estações carregadas")
 
-    print("🔮 Carregando dados de forecast...")
-    forecast_dict = load_forecast_data(forecast_dir, station_ids, forcings=forcings)
-    print(f"✓ {len(forecast_dict)} estações com forecast carregadas")
+    if forecast_dir is not None and forecast_dir.exists():
+        print("🔮 Carregando dados de forecast...")
+        forecast_dict = load_forecast_data(forecast_dir, station_ids, forcings=forcings)
+        print(f"✓ {len(forecast_dict)} estações com forecast carregadas")
+    else:
+        forecast_dict = {}
+        print("ℹ️  Sem diretório de forecast — usando precipitação observada como "
+              "fonte única (D+0…D+N tratado como 'forecast' pelo modelo).")
 
     # Extrair nomes brutos das colunas obs para o merge
     # (antes do merge, os nomes ainda são os originais do CSV)
